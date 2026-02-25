@@ -237,7 +237,6 @@ export default function ProtocolPage() {
                   placeholder="mis. 12/2026"
                   value={formRepertorium}
                   onChange={(e) => setFormRepertorium(e.target.value)}
-                  placeholder="mis. 12/2026"
                 />
               </div>
             </div>

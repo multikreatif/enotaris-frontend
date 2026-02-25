@@ -44,6 +44,7 @@ import {
   type DocumentRequirementTemplateItemResponse,
   type CaseDocumentEntryItem,
 } from '@/lib/api';
+import { DocumentPreviewPanel } from './document-preview-panel';
 
 const MAX_FILE_SIZE_MB = 10;
 const ACCEPTED_TYPES = '.pdf,.jpg,.jpeg,.png';
@@ -99,6 +100,8 @@ export function CaseDocumentTab({ caseId, token, picName = '-', userRole, curren
   const [rejectDialogEntry, setRejectDialogEntry] = useState<CaseDocumentEntryItem | null>(null);
   const [rejectNote, setRejectNote] = useState('');
   const [rejectSubmitting, setRejectSubmitting] = useState(false);
+  const [inspectEntry, setInspectEntry] = useState<CaseDocumentEntryItem | null>(null);
+  const [inspectDocumentName, setInspectDocumentName] = useState('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const isNotaris = userRole?.toLowerCase() === 'notaris';
 
@@ -271,6 +274,45 @@ export function CaseDocumentTab({ caseId, token, picName = '-', userRole, curren
     }
   };
 
+  const handlePanelVerify = useCallback(
+    async (entry: CaseDocumentEntryItem) => {
+      if (!token || !caseId) return;
+      setPatchingEntryId(entry.id);
+      try {
+        await patchCaseDocumentEntryApi(token, caseId, entry.id, { verification_status: 'verified' });
+        setInspectEntry(null);
+        setInspectDocumentName('');
+        await loadDocuments();
+      } catch (e) {
+        alert(e instanceof Error ? e.message : 'Gagal memverifikasi');
+      } finally {
+        setPatchingEntryId(null);
+      }
+    },
+    [token, caseId, loadDocuments]
+  );
+
+  const handlePanelReject = useCallback(
+    async (entry: CaseDocumentEntryItem, note: string) => {
+      if (!token || !caseId) return;
+      setPatchingEntryId(entry.id);
+      try {
+        await patchCaseDocumentEntryApi(token, caseId, entry.id, {
+          verification_status: 'rejected',
+          rejection_note: note || undefined,
+        });
+        setInspectEntry(null);
+        setInspectDocumentName('');
+        await loadDocuments();
+      } catch (e) {
+        alert(e instanceof Error ? e.message : 'Gagal menolak dokumen');
+      } finally {
+        setPatchingEntryId(null);
+      }
+    },
+    [token, caseId, loadDocuments]
+  );
+
   const filteredRepositori = search.trim()
     ? repositoriDocs.filter((d) =>
         d.file_name.toLowerCase().includes(search.trim().toLowerCase()),
@@ -396,19 +438,21 @@ export function CaseDocumentTab({ caseId, token, picName = '-', userRole, curren
                           </td>
                           <td className="py-3">
                             {!entry ? (
-                              <span className="text-muted-foreground text-xs">BELUM ADA</span>
+                              <span className="inline-flex items-center gap-1 rounded-full border border-muted-foreground/40 bg-muted/50 px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+                                BELUM ADA
+                              </span>
                             ) : isVerified ? (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-success/15 px-2.5 py-0.5 text-xs font-medium text-success">
+                              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400 px-2.5 py-0.5 text-xs font-medium">
                                 <CheckCircle2 className="size-3.5" />
                                 Terverifikasi
                               </span>
                             ) : isRejected ? (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-2.5 py-0.5 text-xs font-medium text-destructive">
+                              <span className="inline-flex items-center gap-1 rounded-full bg-red-500/15 text-red-700 dark:bg-red-500/20 dark:text-red-400 px-2.5 py-0.5 text-xs font-medium">
                                 <XCircle className="size-3.5" />
                                 Ditolak
                               </span>
                             ) : (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-warning/15 px-2.5 py-0.5 text-xs font-medium text-warning">
+                              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400 px-2.5 py-0.5 text-xs font-medium">
                                 <Clock className="size-3.5" />
                                 Menunggu
                               </span>
@@ -423,16 +467,16 @@ export function CaseDocumentTab({ caseId, token, picName = '-', userRole, curren
                                 className={cn(
                                   'inline-flex items-center justify-center size-8 rounded-md border transition-colors',
                                   entry.physical_received
-                                    ? 'border-success bg-success/10 text-success'
+                                    ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400'
                                     : 'border-border hover:bg-muted',
                                 )}
-                                title={entry.physical_received ? 'Fisik diterima' : 'Tandai fisik diterima'}
-                                aria-label={entry.physical_received ? 'Fisik diterima' : 'Belum diterima'}
+                                title={entry.physical_received ? 'Fisik sudah diterima (klik untuk batalkan)' : 'Tandai fisik diterima'}
+                                aria-label={entry.physical_received ? 'Fisik sudah diterima' : 'Belum diterima'}
                               >
                                 {entry.physical_received ? (
-                                  <CheckCircle2 className="size-4" />
+                                  <CheckCircle2 className="size-5 shrink-0" strokeWidth={2.5} />
                                 ) : (
-                                  <span className="size-4 rounded-sm border-2 border-current opacity-50" />
+                                  <span className="size-4 rounded-sm border-2 border-muted-foreground/60" aria-hidden />
                                 )}
                               </button>
                             ) : (
@@ -449,17 +493,13 @@ export function CaseDocumentTab({ caseId, token, picName = '-', userRole, curren
                                   variant="outline"
                                   size="sm"
                                   className="gap-1.5"
-                                  asChild
+                                  onClick={() => {
+                                    setInspectEntry(entry);
+                                    setInspectDocumentName(req.name);
+                                  }}
                                 >
-                                  <a
-                                    href={entry.presign_url}
-                                    target="_blank"
-                                    rel="noreferrer noopener"
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    <Eye className="size-4" />
-                                    Periksa
-                                  </a>
+                                  <Eye className="size-4" />
+                                  Periksa
                                 </Button>
                                 {isNotaris && entry.verification_status === 'pending' && (
                                   <>
@@ -587,40 +627,43 @@ export function CaseDocumentTab({ caseId, token, picName = '-', userRole, curren
         )}
       </div>
 
-      {/* Upload modal */}
+      {/* Upload modal - tata letak Metronic */}
       <Dialog open={uploadOpen} onOpenChange={(open) => !open && closeUpload()}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Unggah Dokumen Baru</DialogTitle>
           </DialogHeader>
-          <DialogBody className="gap-4">
+          <DialogBody className="space-y-5">
             {uploadStep === 1 && (
               <>
-                <div
-                  onDrop={handleDrop}
-                  onDragOver={(e) => e.preventDefault()}
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-primary/40 bg-primary/5 py-10 transition-colors hover:bg-primary/10"
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept={ACCEPTED_TYPES}
-                    className="hidden"
-                    onChange={handleFileSelect}
-                  />
-                  <div className="flex size-14 items-center justify-center rounded-full bg-primary/20">
-                    <UploadCloud className="size-7 text-primary" />
+                <div className="space-y-2">
+                  <Label className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
+                    Pilih File
+                  </Label>
+                  <div
+                    onDrop={handleDrop}
+                    onDragOver={(e) => e.preventDefault()}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border bg-muted/20 py-10 transition-colors hover:border-primary/50 hover:bg-muted/30"
+                  >
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept={ACCEPTED_TYPES}
+                      className="hidden"
+                      onChange={handleFileSelect}
+                    />
+                    <div className="flex size-12 items-center justify-center rounded-full bg-primary/15">
+                      <UploadCloud className="size-6 text-primary" />
+                    </div>
+                    <p className="text-sm font-medium text-foreground">Klik atau seret file ke sini</p>
+                    <p className="text-xs text-muted-foreground">
+                      PDF, JPG, atau PNG (maks. {MAX_FILE_SIZE_MB} MB)
+                    </p>
                   </div>
-                  <p className="text-sm font-medium text-foreground">
-                    Klik atau seret file ke sini
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    PDF, JPG, atau PNG (Maks. {MAX_FILE_SIZE_MB}MB)
-                  </p>
                 </div>
-                <div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-800 dark:bg-amber-950/40">
-                  <AlertCircle className="size-5 shrink-0 text-amber-600 dark:text-amber-500" />
+                <div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-950/40">
+                  <AlertCircle className="size-5 shrink-0 text-amber-600 dark:text-amber-500 mt-0.5" />
                   <p className="text-xs text-amber-800 dark:text-amber-200">
                     Pastikan dokumen terlihat jelas dan tidak terpotong untuk mempermudah verifikasi.
                   </p>
@@ -629,67 +672,81 @@ export function CaseDocumentTab({ caseId, token, picName = '-', userRole, curren
             )}
 
             {uploadStep === 2 && uploadFile && (
-              <>
-                <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2">
-                  <FileText className="size-8 shrink-0 text-muted-foreground" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">{uploadFile.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {(uploadFile.size / 1024 / 1024).toFixed(2)} MB · SIAP DIUNGGAH
-                    </p>
+              <div className="space-y-5">
+                <div className="grid gap-4 sm:grid-cols-1">
+                  <div className="space-y-2">
+                    <Label className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
+                      File Dipilih
+                    </Label>
+                    <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3">
+                      <FileText className="size-8 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-medium text-foreground">{uploadFile.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {(uploadFile.size / 1024 / 1024).toFixed(2)} MB · siap diunggah
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="upload-doc-type" className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
+                      Jenis Dokumen
+                    </Label>
+                    <Select value={uploadDocType} onValueChange={setUploadDocType}>
+                      <SelectTrigger id="upload-doc-type">
+                        <SelectValue placeholder="Pilih jenis dokumen" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {documentTypeOptions.map((opt) => (
+                          <SelectItem key={opt.id} value={opt.id}>
+                            {opt.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
+                      Status Fisik
+                    </Label>
+                    <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3 hover:bg-muted/30">
+                      <input
+                        type="checkbox"
+                        checked={uploadPhysical}
+                        onChange={(e) => setUploadPhysical(e.target.checked)}
+                        className="size-4 rounded border-input"
+                      />
+                      <span className="text-sm text-foreground">Dokumen fisik sudah diterima kantor</span>
+                    </label>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="upload-notes" className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
+                      Catatan Tambahan (opsional)
+                    </Label>
+                    <textarea
+                      id="upload-notes"
+                      value={uploadNotes}
+                      onChange={(e) => setUploadNotes(e.target.value)}
+                      placeholder="Contoh: Nama di KTP sedikit berbeda dengan Sertifikat..."
+                      rows={3}
+                      className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <Label>Pilih Jenis Dokumen</Label>
-                  <Select value={uploadDocType} onValueChange={setUploadDocType}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Jenis dokumen" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {documentTypeOptions.map((opt) => (
-                        <SelectItem key={opt.id} value={opt.id}>
-                          {opt.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <label className="flex cursor-pointer items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={uploadPhysical}
-                    onChange={(e) => setUploadPhysical(e.target.checked)}
-                    className="rounded border-border"
-                  />
-                  <span className="text-sm">Dokumen Fisik Sudah Diterima Kantor</span>
-                </label>
-                <div className="space-y-2">
-                  <Label>Catatan Tambahan</Label>
-                  <textarea
-                    value={uploadNotes}
-                    onChange={(e) => setUploadNotes(e.target.value)}
-                    placeholder="Contoh: Nama di KTP sedikit berbeda dengan Sertifikat..."
-                    className="min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  />
-                </div>
-              </>
+              </div>
             )}
 
             {uploadErr && (
-              <p className="text-sm text-destructive">{uploadErr}</p>
+              <p className="text-sm text-destructive rounded-lg bg-destructive/10 px-3 py-2">{uploadErr}</p>
             )}
           </DialogBody>
-          <DialogFooter>
+          <DialogFooter className="gap-2 border-t border-border pt-4">
             {uploadStep === 2 ? (
               <>
                 <Button type="button" variant="outline" onClick={() => setUploadStep(1)}>
                   Kembali
                 </Button>
-                <Button
-                  type="button"
-                  onClick={handleUploadSubmit}
-                  disabled={uploadSubmitting}
-                >
+                <Button type="button" onClick={handleUploadSubmit} disabled={uploadSubmitting}>
                   {uploadSubmitting ? 'Mengunggah...' : 'Simpan Dokumen'}
                 </Button>
               </>
@@ -734,6 +791,20 @@ export function CaseDocumentTab({ caseId, token, picName = '-', userRole, curren
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Panel Periksa: preview dokumen + Panel Verifikasi (Syncfusion PDF viewer untuk PDF) */}
+      {inspectEntry && (
+        <DocumentPreviewPanel
+          open={!!inspectEntry}
+          onOpenChange={(open) => !open && setInspectEntry(null)}
+          documentName={inspectDocumentName}
+          entry={inspectEntry}
+          isNotaris={!!isNotaris}
+          onVerify={handlePanelVerify}
+          onReject={handlePanelReject}
+          patchingEntryId={patchingEntryId}
+        />
+      )}
     </div>
   );
 }
