@@ -1,6 +1,6 @@
 'use client';
 
-import { JSX, useCallback, useEffect, useMemo, useState } from 'react';
+import { JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -28,6 +28,8 @@ import {
   getTaskHistoryApi,
   getScheduleEventsApi,
   deleteScheduleEventApi,
+  createProtocolEntryApi,
+  getProtocolEntriesApi,
   type CaseResponse,
   type TaskResponse,
   type TaskStatus,
@@ -54,6 +56,7 @@ import { ArrowLeft, Plus, LayoutDashboard, ListTodo, History, FileText, User, Wo
 import { cn } from '@/lib/utils';
 import { TimelineItem } from '@/components/partials/activities/timeline-item';
 import { ScheduleEventDialog } from '@/app/(protected)/calendar/_components/schedule-event-dialog';
+import { CaseDocumentTab } from '@/app/(protected)/cases/[id]/_components/case-document-tab';
 
 const TASK_STATUSES_EDITABLE: TaskStatus[] = ['todo', 'in_progress', 'done', 'blocked'];
 const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
@@ -144,7 +147,7 @@ function formatTime(iso: string): string {
 export default function CaseDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const caseId = typeof params.id === 'string' ? params.id : '';
   const [caseData, setCaseData] = useState<CaseResponse | null>(null);
   const [tasks, setTasks] = useState<TaskResponse[]>([]);
@@ -165,6 +168,15 @@ export default function CaseDetailPage() {
   const [scheduleDialogDefaultTitle, setScheduleDialogDefaultTitle] = useState<string | undefined>();
   const [taskHistoryByTaskId, setTaskHistoryByTaskId] = useState<Record<string, TaskHistoryItem[]>>({});
   const [jenisPekerjaanList, setJenisPekerjaanList] = useState<JenisPekerjaanResponse[]>([]);
+  const [protocolDialogOpen, setProtocolDialogOpen] = useState(false);
+  const [protocolYear, setProtocolYear] = useState('');
+  const [protocolRepertorium, setProtocolRepertorium] = useState('');
+  const [protocolLocation, setProtocolLocation] = useState('');
+  const [protocolStatus, setProtocolStatus] = useState<'active' | 'closed'>('active');
+  const [protocolNotes, setProtocolNotes] = useState('');
+  const [protocolErr, setProtocolErr] = useState<string | null>(null);
+  const [protocolSubmitting, setProtocolSubmitting] = useState(false);
+  const [hasProtocolEntry, setHasProtocolEntry] = useState(false);
 
   const load = useCallback(async () => {
     if (!token || !caseId) return;
@@ -179,6 +191,16 @@ export default function CaseDetailPage() {
       ]);
       setCaseData(c);
       setTasks(t);
+      if (c.status === 'registered' || c.status === 'closed') {
+        try {
+          const { data: protocolList } = await getProtocolEntriesApi(token, { case_id: c.id, limit: 1 });
+          setHasProtocolEntry(protocolList.length > 0);
+        } catch {
+          setHasProtocolEntry(false);
+        }
+      } else {
+        setHasProtocolEntry(false);
+      }
       const map: Record<string, string> = {};
       users.forEach((u) => {
         map[u.id] = u.name?.trim() ? u.name : u.email;
@@ -437,14 +459,25 @@ export default function CaseDetailPage() {
               Daftar
             </Link>
           </Button>
-          <Button variant="outline" onClick={() => setApplyTemplateOpen(true)}>
-            <Workflow className="me-2 size-4" />
-            Terapkan Template
-          </Button>
-          <Button onClick={() => setAddTaskOpen(true)}>
-            <Plus className="me-2 size-4" />
-            Tambah Tahapan
-          </Button>
+          {caseData && (caseData.status === 'registered' || caseData.status === 'closed') && !hasProtocolEntry && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setProtocolErr(null);
+                setProtocolSubmitting(false);
+                setProtocolYear(String(new Date().getFullYear()));
+                setProtocolRepertorium('');
+                setProtocolLocation('');
+                setProtocolStatus('active');
+                setProtocolNotes('');
+                setProtocolDialogOpen(true);
+              }}
+            >
+              <FileText className="me-2 size-4" />
+              Tambah ke Digital Protocol
+            </Button>
+          )}
         </ToolbarActions>
       </Toolbar>
 
@@ -466,13 +499,17 @@ export default function CaseDetailPage() {
                   <ListTodo className="size-4" />
                   Tahapan
                 </TabsTrigger>
+                <TabsTrigger value="kalender" className="gap-2">
+                  <Calendar className="size-4" />
+                  Kalender
+                </TabsTrigger>
                 <TabsTrigger value="timeline" className="gap-2">
                   <History className="size-4" />
                   Timeline
                 </TabsTrigger>
-                <TabsTrigger value="kalender" className="gap-2">
-                  <Calendar className="size-4" />
-                  Kalender
+                <TabsTrigger value="dokumen" className="gap-2">
+                  <FileText className="size-4" />
+                  Dokumen
                 </TabsTrigger>
               </TabsList>
 
@@ -587,9 +624,19 @@ export default function CaseDetailPage() {
                             <ListTodo className="size-4 text-muted-foreground" />
                             Progress tahapan
                           </h3>
-                          <Button variant="ghost" size="sm" onClick={() => setActiveTab('tahapan')}>
-                            Lihat semua
-                          </Button>
+                          <div className="flex items-center gap-2">
+                            <Button variant="ghost" size="sm" onClick={() => setActiveTab('tahapan')}>
+                              Lihat semua
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setApplyTemplateOpen(true)}
+                            >
+                              <Workflow className="me-1.5 size-4" />
+                              Terapkan Template
+                            </Button>
+                          </div>
                         </div>
                         <div className="p-4">
                           {tasks.length === 0 ? (
@@ -672,10 +719,21 @@ export default function CaseDetailPage() {
                   <div className="kt-card">
                     <div className="kt-card-header flex flex-row items-center justify-between gap-4 py-4 min-h-14 border-b border-border">
                       <h3 className="text-lg font-semibold">Tahapan proses</h3>
-                      <Button onClick={() => setAddTaskOpen(true)} size="sm">
-                        <Plus className="me-2 size-4" />
-                        Tambah Tahapan
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button onClick={() => setAddTaskOpen(true)} size="sm">
+                          <Plus className="me-2 size-4" />
+                          Tambah Tahapan
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setApplyTemplateOpen(true)}
+                        >
+                          <Workflow className="me-1.5 size-4" />
+                          Terapkan Template
+                        </Button>
+                      </div>
                     </div>
                     <div className="kt-card-table">
                       <div className="kt-table-wrapper kt-scrollable overflow-x-auto">
@@ -977,7 +1035,148 @@ export default function CaseDetailPage() {
                   )}
                 </section>
               </TabsContent>
+
+              <TabsContent value="dokumen" className="mt-0">
+                <CaseDocumentTab
+                  caseId={caseId}
+                  token={token}
+                  picName={caseData?.staf_penanggung_jawab_id ? (userNames[caseData.staf_penanggung_jawab_id] ?? '-') : '-'}
+                  userRole={user?.role_name}
+                  currentUserName={user?.name ?? user?.email}
+                />
+              </TabsContent>
             </Tabs>
+            <Dialog open={protocolDialogOpen} onOpenChange={setProtocolDialogOpen}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Tambah ke Digital Protocol</DialogTitle>
+                </DialogHeader>
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    if (!token || !caseData) return;
+                    const yearValue =
+                      protocolYear.trim() !== ''
+                        ? Number(protocolYear.trim())
+                        : new Date().getFullYear();
+                    if (!yearValue || isNaN(yearValue)) {
+                      setProtocolErr('Tahun tidak valid.');
+                      return;
+                    }
+                    if (!protocolRepertorium.trim() || !protocolLocation.trim()) {
+                      setProtocolErr('No repertorium dan lokasi wajib diisi.');
+                      return;
+                    }
+                    try {
+                      setProtocolSubmitting(true);
+                      setProtocolErr(null);
+                      await createProtocolEntryApi(token, {
+                        case_id: caseData.id,
+                        year: yearValue,
+                        repertorium_number: protocolRepertorium.trim(),
+                        jenis: caseData.jenis_akta || 'Akta',
+                        physical_location: protocolLocation.trim(),
+                        status: protocolStatus,
+                        notes: protocolNotes.trim() || undefined,
+                      });
+                      setProtocolDialogOpen(false);
+                      setHasProtocolEntry(true);
+                    } catch (err) {
+                      setProtocolErr(
+                        err instanceof Error
+                          ? err.message
+                          : 'Gagal membuat entri Digital Protocol',
+                      );
+                    } finally {
+                      setProtocolSubmitting(false);
+                    }
+                  }}
+                >
+                  <DialogBody className="space-y-4">
+                    {protocolErr && (
+                      <p className="text-sm text-destructive">{protocolErr}</p>
+                    )}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="proto_year">Tahun</Label>
+                        <Input
+                          id="proto_year"
+                          value={protocolYear}
+                          onChange={(e) => setProtocolYear(e.target.value)}
+                          placeholder={String(new Date().getFullYear())}
+                          inputMode="numeric"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="proto_rep">No Repertorium</Label>
+                        <Input
+                          id="proto_rep"
+                          value={protocolRepertorium}
+                          onChange={(e) => setProtocolRepertorium(e.target.value)}
+                          placeholder="mis. 12/2026"
+                          required
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Jenis</Label>
+                      <Input
+                        value={caseData.jenis_akta}
+                        readOnly
+                        className="bg-muted/60"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="proto_loc">Lokasi fisik</Label>
+                      <Input
+                        id="proto_loc"
+                        value={protocolLocation}
+                        onChange={(e) => setProtocolLocation(e.target.value)}
+                        placeholder="mis. Rak A1, Box B2"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Status</Label>
+                      <Select
+                        value={protocolStatus}
+                        onValueChange={(v) => setProtocolStatus(v as 'active' | 'closed')}
+                      >
+                        <SelectTrigger className="w-40">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="active">Active</SelectItem>
+                          <SelectItem value="closed">Closed</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="proto_notes">Catatan (opsional)</Label>
+                      <Input
+                        id="proto_notes"
+                        value={protocolNotes}
+                        onChange={(e) => setProtocolNotes(e.target.value)}
+                        placeholder="Catatan tambahan"
+                      />
+                    </div>
+                  </DialogBody>
+                  <DialogFooter>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setProtocolDialogOpen(false)}
+                      disabled={protocolSubmitting}
+                    >
+                      Batal
+                    </Button>
+                    <Button type="submit" disabled={protocolSubmitting}>
+                      Simpan
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
           </>
         )}
       </div>

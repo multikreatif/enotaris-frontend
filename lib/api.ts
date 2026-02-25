@@ -31,7 +31,12 @@ export async function apiFetch(
     headers.set('Authorization', `Bearer ${token}`);
   }
   if (!headers.has('Content-Type')) {
-    headers.set('Content-Type', 'application/json');
+    const body = init?.body as unknown;
+    const isFormData =
+      typeof FormData !== 'undefined' && body instanceof FormData;
+    if (!isFormData) {
+      headers.set('Content-Type', 'application/json');
+    }
   }
   return fetch(url, { ...init, headers });
 }
@@ -469,6 +474,8 @@ export interface CaseResponse {
   last_done_task_at?: string | null;
   /** Persentase progress tahapan (0-100). */
   progress_percent?: number | null;
+  /** Template dokumen persyaratan untuk tab Dokumen. */
+  document_requirement_template_id?: string | null;
 }
 
 export interface TaskResponse {
@@ -489,6 +496,139 @@ export interface TaskResponse {
 export interface ListCasesResult {
   data: CaseResponse[];
   total: number;
+}
+
+// --- Documents ---
+
+export interface DocumentItem {
+  key: string;
+  file_name: string;
+  size: number;
+  url: string;
+  uploaded_at: string;
+}
+
+/** GET /api/v1/documents — list documents for current office. */
+export async function getDocumentsApi(token: string | null, params?: { folder?: string }): Promise<DocumentItem[]> {
+  const sp = new URLSearchParams();
+  if (params?.folder) sp.set('folder', params.folder);
+  const q = sp.toString();
+  const path = q ? `/api/v1/documents?${q}` : '/api/v1/documents';
+  const res = await apiFetch(path, { method: 'GET' }, token);
+  const data = await res.json().catch(() => []);
+  if (!res.ok) throw new Error((data?.error as string) || 'Gagal memuat dokumen');
+  return Array.isArray(data) ? data : [];
+}
+
+/** POST /api/v1/documents — upload a new document. */
+export async function uploadDocumentApi(
+  token: string | null,
+  file: File,
+  params?: { folder?: string }
+): Promise<DocumentItem> {
+  const form = new FormData();
+  form.append('file', file);
+  if (params?.folder) form.append('folder', params.folder);
+  const res = await apiFetch('/api/v1/documents', { method: 'POST', body: form }, token);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data?.error as string) || 'Gagal mengunggah dokumen');
+  return data as DocumentItem;
+}
+
+// --- Digital Protocol ---
+
+export interface ProtocolEntry {
+  id: string;
+  office_id: string;
+  case_id?: string | null;
+  year: number;
+  repertorium_number: string;
+  jenis: string;
+  physical_location: string;
+  status: string;
+  notes?: string | null;
+  digital_object_key?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ListProtocolEntriesResult {
+  data: ProtocolEntry[];
+  total: number;
+}
+
+/** GET /api/v1/protocol-entries — list digital protocol entries. */
+export async function getProtocolEntriesApi(
+  token: string | null,
+  params?: { case_id?: string; year?: number; jenis?: string; status?: string; limit?: number; offset?: number }
+): Promise<ListProtocolEntriesResult> {
+  const sp = new URLSearchParams();
+  if (params?.case_id) sp.set('case_id', params.case_id);
+  if (params?.year != null) sp.set('year', String(params.year));
+  if (params?.jenis) sp.set('jenis', params.jenis);
+  if (params?.status) sp.set('status', params.status);
+  if (params?.limit != null) sp.set('limit', String(params.limit));
+  if (params?.offset != null) sp.set('offset', String(params.offset));
+  const q = sp.toString();
+  const path = q ? `/api/v1/protocol-entries?${q}` : '/api/v1/protocol-entries';
+  const res = await apiFetch(path, { method: 'GET' }, token);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data?.error as string) || 'Gagal memuat digital protocol');
+  return {
+    data: Array.isArray(data.data) ? (data.data as ProtocolEntry[]) : [],
+    total: typeof data.total === 'number' ? (data.total as number) : 0,
+  };
+}
+
+export interface CreateProtocolEntryBody {
+  case_id?: string | null;
+  year: number;
+  repertorium_number: string;
+  jenis: string;
+  physical_location: string;
+  status?: string;
+  notes?: string;
+  digital_object_key?: string;
+}
+
+export interface UpdateProtocolEntryBody {
+  case_id?: string | null;
+  year?: number;
+  repertorium_number?: string;
+  jenis?: string;
+  physical_location?: string;
+  status?: string;
+  notes?: string;
+  digital_object_key?: string;
+}
+
+/** POST /api/v1/protocol-entries — create new digital protocol entry. */
+export async function createProtocolEntryApi(
+  token: string | null,
+  body: CreateProtocolEntryBody
+): Promise<ProtocolEntry> {
+  const res = await apiFetch('/api/v1/protocol-entries', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }, token);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data?.error as string) || 'Gagal membuat entri protocol');
+  return data as ProtocolEntry;
+}
+
+/** PUT /api/v1/protocol-entries/:id — update digital protocol entry. */
+export async function updateProtocolEntryApi(
+  token: string | null,
+  id: string,
+  body: UpdateProtocolEntryBody
+): Promise<ProtocolEntry> {
+  const res = await apiFetch(`/api/v1/protocol-entries/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  }, token);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data?.error as string) || 'Gagal memperbarui entri protocol');
+  return data as ProtocolEntry;
 }
 
 /** GET /api/v1/cases */
@@ -531,6 +671,7 @@ export interface CreateCaseBody {
   parties?: { client_id: string; role: string }[];
   task_names?: string[];
   workflow_template_id?: string;
+  document_requirement_template_id?: string;
   // PPAT
   jenis_pekerjaan_ppat?: string;
   luas_tanah_m2?: number | null;
@@ -558,6 +699,7 @@ export interface UpdateCaseBody {
   tanggal_mulai?: string | null;
   target_selesai?: string | null;
   nilai_transaksi?: number | null;
+  document_requirement_template_id?: string | null;
 }
 
 /** PUT /api/v1/cases/:id */
@@ -758,6 +900,150 @@ export async function createWorkflowTemplateApi(
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((data?.error as string) || 'Gagal membuat template workflow');
   return data as WorkflowTemplateItem;
+}
+
+// --- Document requirement templates (admin kantor) ---
+
+export interface DocumentRequirementTemplateItemResponse {
+  id: string;
+  item_key: string;
+  document_name: string;
+  document_category: string;
+  sort_order: number;
+}
+
+export interface DocumentRequirementTemplateItem {
+  id: string;
+  item_key: string;
+  document_name: string;
+  document_category: string;
+  sort_order: number;
+}
+
+export interface DocumentRequirementTemplateResponse {
+  id: string;
+  office_id: string;
+  name: string;
+  category: string;
+  jenis_pekerjaan?: string;
+  description?: string;
+  items?: DocumentRequirementTemplateItemResponse[];
+  created_at: string;
+  updated_at: string;
+}
+
+/** GET /api/v1/document-requirement-templates */
+export async function getDocumentRequirementTemplatesApi(
+  token: string | null,
+  params?: { category?: string; jenis_pekerjaan?: string }
+): Promise<DocumentRequirementTemplateResponse[]> {
+  const sp = new URLSearchParams();
+  if (params?.category) sp.set('category', params.category);
+  if (params?.jenis_pekerjaan) sp.set('jenis_pekerjaan', params.jenis_pekerjaan);
+  const q = sp.toString();
+  const path = q ? `/api/v1/document-requirement-templates?${q}` : '/api/v1/document-requirement-templates';
+  const res = await apiFetch(path, { method: 'GET' }, token);
+  const data = await res.json().catch(() => []);
+  if (!res.ok) throw new Error(Array.isArray(data) ? 'Gagal memuat template dokumen' : (data?.error as string) || 'Gagal memuat template dokumen');
+  return Array.isArray(data) ? data : [];
+}
+
+/** GET /api/v1/cases/:id/document-requirements — requirement items for this case (by category + jenis_pekerjaan). */
+export async function getDocumentRequirementsForCaseApi(
+  token: string | null,
+  caseId: string
+): Promise<DocumentRequirementTemplateItemResponse[]> {
+  const res = await apiFetch(`/api/v1/cases/${caseId}/document-requirements`, { method: 'GET' }, token);
+  const data = await res.json().catch(() => []);
+  if (!res.ok) throw new Error((data?.error as string) || 'Gagal memuat daftar dokumen persyaratan');
+  return Array.isArray(data) ? data : [];
+}
+
+// --- Case document entries (persyaratan: upload tracking, physical, verification by notaris) ---
+
+export interface CaseDocumentEntryItem {
+  id: string;
+  case_id: string;
+  item_key: string;
+  item_label?: string;
+  file_key: string;
+  presign_url: string;
+  uploaded_by_id: string;
+  uploaded_by_name: string;
+  uploaded_at: string;
+  verification_status: 'pending' | 'verified' | 'rejected';
+  physical_received: boolean;
+  verified_by_id?: string | null;
+  verified_at?: string | null;
+  rejection_note?: string;
+}
+
+/** GET /api/v1/cases/:id/document-entries */
+export async function getCaseDocumentEntriesApi(
+  token: string | null,
+  caseId: string
+): Promise<CaseDocumentEntryItem[]> {
+  const res = await apiFetch(`/api/v1/cases/${caseId}/document-entries`, { method: 'GET' }, token);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data?.error as string) || 'Gagal memuat entri dokumen');
+  return Array.isArray(data?.data) ? data.data : [];
+}
+
+/** POST /api/v1/cases/:id/document-entries — create or replace entry (after upload; sets status pending). */
+export async function createCaseDocumentEntryApi(
+  token: string | null,
+  caseId: string,
+  body: { item_key: string; file_key: string }
+): Promise<{ data: unknown }> {
+  const res = await apiFetch(`/api/v1/cases/${caseId}/document-entries`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }, token);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data?.error as string) || 'Gagal menyimpan entri dokumen');
+  return data;
+}
+
+/** PATCH /api/v1/cases/:id/document-entries/:eid — update physical_received and/or verification (notaris). */
+export async function patchCaseDocumentEntryApi(
+  token: string | null,
+  caseId: string,
+  entryId: string,
+  body: { physical_received?: boolean; verification_status?: 'verified' | 'rejected'; rejection_note?: string }
+): Promise<{ data: unknown }> {
+  const res = await apiFetch(`/api/v1/cases/${caseId}/document-entries/${entryId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  }, token);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data?.error as string) || 'Gagal memperbarui entri dokumen');
+  return data;
+}
+
+export interface CreateDocumentRequirementItemBody {
+  item_key: string;
+  document_name: string;
+  document_category?: string;
+  sort_order?: number;
+}
+
+export interface CreateDocumentRequirementTemplateBody {
+  name: string;
+  category?: string;
+  jenis_pekerjaan?: string;
+  description?: string;
+  items: CreateDocumentRequirementItemBody[];
+}
+
+/** POST /api/v1/document-requirement-templates */
+export async function createDocumentRequirementTemplateApi(
+  token: string | null,
+  body: CreateDocumentRequirementTemplateBody
+): Promise<DocumentRequirementTemplateResponse> {
+  const res = await apiFetch('/api/v1/document-requirement-templates', { method: 'POST', body: JSON.stringify(body) }, token);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data?.error as string) || 'Gagal membuat template dokumen');
+  return data as DocumentRequirementTemplateResponse;
 }
 
 // --- Schedule / Calendar events ---

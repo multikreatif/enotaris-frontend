@@ -20,11 +20,13 @@ import {
   createClientApi,
   createCaseApi,
   getWorkflowTemplatesApi,
+  getDocumentRequirementTemplatesApi,
   getJenisPekerjaanApi,
   type ClientResponse,
   type CreateCaseBody,
   type CreateClientBody,
   type WorkflowTemplateItem,
+  type DocumentRequirementTemplateResponse,
   type JenisPekerjaanResponse,
 } from '@/lib/api';
 import type { UserResponse } from '@/lib/auth-types';
@@ -64,21 +66,25 @@ export function CreatePPATCaseDialog({
   const [addClientOpen, setAddClientOpen] = useState<'primary' | 'mengalihkan' | 'menerima' | null>(null);
   const [templates, setTemplates] = useState<WorkflowTemplateItem[]>([]);
   const [workflowTemplateId, setWorkflowTemplateId] = useState('');
+  const [docTemplates, setDocTemplates] = useState<DocumentRequirementTemplateResponse[]>([]);
+  const [documentTemplateId, setDocumentTemplateId] = useState('');
   const [jenisPekerjaanList, setJenisPekerjaanList] = useState<JenisPekerjaanResponse[]>([]);
 
   const loadData = useCallback(async () => {
     if (!token) return;
     setLoadingClients(true);
     try {
-      const [c, u, t, jp] = await Promise.all([
+      const [c, u, t, dt, jp] = await Promise.all([
         getClientsApi(token, { limit: 500 }),
         getUsersApi(token),
         getWorkflowTemplatesApi(token, { category: 'ppat' }),
+        getDocumentRequirementTemplatesApi(token, { category: 'ppat' }),
         getJenisPekerjaanApi(token, { category: 'ppat' }),
       ]);
       setClients(c.data);
       setUsers(u);
       setTemplates(t);
+      setDocTemplates(dt);
       setJenisPekerjaanList(jp.filter((j) => j.active));
     } finally {
       setLoadingClients(false);
@@ -126,6 +132,7 @@ export function CreatePPATCaseDialog({
         status: 'drafting',
         parties,
         workflow_template_id: workflowTemplateId.trim() || undefined,
+        document_requirement_template_id: documentTemplateId.trim() || undefined,
         nilai_transaksi: hargaTransaksi ?? undefined,
         luas_tanah_m2: luasTanah ? parseFloat(luasTanah) : undefined,
         luas_bangunan_m2: luasBangunan ? parseFloat(luasBangunan) : undefined,
@@ -142,6 +149,7 @@ export function CreatePPATCaseDialog({
       setJenisPekerjaan('');
       setStafId('');
       setWorkflowTemplateId('');
+      setDocumentTemplateId('');
       setLuasTanah('');
       setLuasBangunan('');
       setHargaTransaksi(null);
@@ -254,6 +262,23 @@ export function CreatePPATCaseDialog({
                       ))}
                     </SelectContent>
                   </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Template dokumen persyaratan (opsional)</Label>
+                  <Select value={documentTemplateId || '_none'} onValueChange={(v) => setDocumentTemplateId(v === '_none' ? '' : v)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Tanpa template — gunakan default atau sesuai jenis pekerjaan" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="_none">Tanpa template</SelectItem>
+                      {docTemplates.map((t) => (
+                        <SelectItem key={t.id} value={t.id}>
+                          {t.name} {t.jenis_pekerjaan ? `(${t.jenis_pekerjaan})` : ''} — {t.items?.length ?? 0} dokumen
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">Tab Dokumen di berkas ini akan menampilkan daftar persyaratan dari template yang dipilih.</p>
                 </div>
               </section>
 

@@ -1,4 +1,4 @@
-import { Building2, Calendar, Columns, FileText, LayoutGrid, ListTodo, Scale, Settings, Briefcase, Users, UserCircle } from 'lucide-react';
+import { Building2, Calendar, Columns, FileText, LayoutGrid, ListTodo, Scale, Settings, Briefcase, Users, UserCircle, FolderOpen } from 'lucide-react';
 import { type MenuConfig } from './types';
 
 /** Sidebar menu for eNotaris. Berkas Akta = tree dropdown (Notaris + PPAT). */
@@ -21,6 +21,16 @@ export const MENU_SIDEBAR_COMPACT: MenuConfig = [
     title: 'Manajemen Klien',
     icon: UserCircle,
     path: '/clients',
+  },
+  {
+    title: 'Dokumen',
+    icon: FolderOpen,
+    path: '/documents',
+  },
+  {
+    title: 'Digital Protocol',
+    icon: FileText,
+    path: '/protocol',
   },
   {
     title: 'Tugas / Task',

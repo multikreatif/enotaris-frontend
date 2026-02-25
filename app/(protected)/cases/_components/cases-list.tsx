@@ -12,10 +12,12 @@ import { useAuth } from '@/providers/auth-provider';
 import {
   createCaseApi,
   getWorkflowTemplatesApi,
+  getDocumentRequirementTemplatesApi,
   getJenisPekerjaanApi,
   type CreateCaseBody,
   type CaseCategory,
   type WorkflowTemplateItem,
+  type DocumentRequirementTemplateResponse,
   type JenisPekerjaanResponse,
 } from '@/lib/api';
 import { CreatePPATCaseDialog } from './create-ppat-case-dialog';
@@ -428,12 +430,15 @@ function CreateCaseDialog({
   const [taskNamesText, setTaskNamesText] = useState('');
   const [workflowTemplateId, setWorkflowTemplateId] = useState('');
   const [templates, setTemplates] = useState<WorkflowTemplateItem[]>([]);
+  const [documentTemplateId, setDocumentTemplateId] = useState('');
+  const [docTemplates, setDocTemplates] = useState<DocumentRequirementTemplateResponse[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     if (open && token) {
       getWorkflowTemplatesApi(token, { category }).then(setTemplates).catch(() => setTemplates([]));
+      getDocumentRequirementTemplatesApi(token, { category }).then(setDocTemplates).catch(() => setDocTemplates([]));
       getJenisPekerjaanApi(token, { category }).then((list) => setJenisPekerjaanList(list.filter((j) => j.active))).catch(() => setJenisPekerjaanList([]));
     }
   }, [open, token, category]);
@@ -460,6 +465,7 @@ function CreateCaseDialog({
         status: status as CreateCaseBody['status'],
         task_names: task_names.length > 0 ? task_names : undefined,
         workflow_template_id: workflowTemplateId.trim() || undefined,
+        document_requirement_template_id: documentTemplateId.trim() || undefined,
       };
       if (category === 'ppat') body.jenis_pekerjaan_ppat = selected.id;
       await createCaseApi(token, body);
@@ -469,6 +475,7 @@ function CreateCaseDialog({
       setStatus('drafting');
       setTaskNamesText('');
       setWorkflowTemplateId('');
+      setDocumentTemplateId('');
       onSuccess();
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Gagal menyimpan berkas');
@@ -549,6 +556,22 @@ function CreateCaseDialog({
                   {templates.map((t) => (
                     <SelectItem key={t.id} value={t.id}>
                       {t.name} {t.jenis_pekerjaan ? `(${t.jenis_pekerjaan})` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Template dokumen persyaratan (opsional)</Label>
+              <Select value={documentTemplateId || '_none'} onValueChange={(v) => setDocumentTemplateId(v === '_none' ? '' : v)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Tanpa template" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">Tanpa template</SelectItem>
+                  {docTemplates.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name} {t.jenis_pekerjaan ? `(${t.jenis_pekerjaan})` : ''} — {t.items?.length ?? 0} dokumen
                     </SelectItem>
                   ))}
                 </SelectContent>
