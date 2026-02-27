@@ -16,11 +16,12 @@ const LayoutContext = createContext<LayoutState | undefined>(undefined);
 // Provider component
 interface LayoutProviderProps {
   children: ReactNode;
+  defaultSidebarTheme?: SidebarTheme;
 }
 
-export function LayoutProvider({ children }: LayoutProviderProps) {
+export function LayoutProvider({ children, defaultSidebarTheme = 'light' }: LayoutProviderProps) {
   const [sidebarCollapse, setSidebarCollapse] = useState(false);
-  const [sidebarTheme, setSidebarTheme] = useState<SidebarTheme>('light');
+  const [sidebarTheme, setSidebarTheme] = useState<SidebarTheme>(defaultSidebarTheme);
 
   return (
     <LayoutContext.Provider

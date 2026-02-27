@@ -6,7 +6,6 @@ import {
   FileText,
   Globe,
   IdCard,
-  LogOut,
   Moon,
   Settings,
   Shield,
@@ -60,23 +59,12 @@ const I18N_LANGUAGES = [
   },
 ];
 
-export interface UserDropdownMenuProps {
-  trigger: ReactNode;
-  /** Jika ada, tampilkan nama & email user dan tombol Logout aktif */
-  user?: { name: string; email: string };
-  onLogout?: () => void | Promise<void>;
-}
-
-export function UserDropdownMenu({ trigger, user, onLogout }: UserDropdownMenuProps) {
+export function UserDropdownMenu({ trigger }: { trigger: ReactNode }) {
   const currenLanguage = I18N_LANGUAGES[0];
   const { theme, setTheme } = useTheme();
 
   const handleThemeToggle = (checked: boolean) => {
     setTheme(checked ? 'dark' : 'light');
-  };
-
-  const handleLogout = () => {
-    onLogout?.();
   };
 
   return (
@@ -92,22 +80,23 @@ export function UserDropdownMenu({ trigger, user, onLogout }: UserDropdownMenuPr
               alt="User avatar"
             />
             <div className="flex flex-col">
-              <span className="text-sm text-mono font-semibold">
-                {user?.name ?? 'Sean'}
-              </span>
+              <Link
+                href="#"
+                className="text-sm text-mono hover:text-primary font-semibold"
+              >
+                Sean
+              </Link>
               <a
-                href={user?.email ? `mailto:${user.email}` : 'mailto:sean@kt.com'}
+                href={`mailto:sean@kt.com`}
                 className="text-xs text-muted-foreground hover:text-primary"
               >
-                {user?.email ?? 'sean@kt.com'}
+                sean@kt.com
               </a>
             </div>
           </div>
-          {!user && (
-            <Badge variant="primary" appearance="light" size="sm">
-              Pro
-            </Badge>
-          )}
+          <Badge variant="primary" appearance="light" size="sm">
+            Pro
+          </Badge>
         </div>
 
         <DropdownMenuSeparator />
@@ -263,14 +252,8 @@ export function UserDropdownMenu({ trigger, user, onLogout }: UserDropdownMenuPr
           </div>
         </DropdownMenuItem>
         <div className="p-2 mt-1">
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full justify-start gap-2"
-            onClick={onLogout ? handleLogout : undefined}
-          >
-            <LogOut className="size-4" />
-            {onLogout ? 'Keluar' : 'Logout'}
+          <Button variant="outline" size="sm" className="w-full">
+            Logout
           </Button>
         </div>
       </DropdownMenuContent>

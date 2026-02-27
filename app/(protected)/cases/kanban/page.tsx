@@ -195,7 +195,7 @@ export default function CasesKanbanPage() {
   }
 
   return (
-    <>
+    <div className="flex flex-col w-full min-w-0">
       <Toolbar>
         <ToolbarHeading
           title="Papan Kanban"
@@ -221,7 +221,7 @@ export default function CasesKanbanPage() {
         </div>
       )}
 
-      <div className="overflow-x-auto overflow-y-hidden pb-2 -mx-2 px-2 scroll-smooth">
+      <div className="overflow-x-auto overflow-y-hidden pb-2 -mx-2 px-2 scroll-smooth w-full">
         <div className="min-w-[1200px]">
           <KanbanComponent
             id="berkas-kanban"
@@ -238,14 +238,14 @@ export default function CasesKanbanPage() {
             height="calc(100vh - 220px)"
           >
             <ColumnsDirective>
-              <ColumnDirective headerText="Drafting" keyField="drafting" showAddButton={false} template={ColumnHeaderTemplate} />
-              <ColumnDirective headerText="Tanda tangan" keyField="signed" showAddButton={false} template={ColumnHeaderTemplate} />
-              <ColumnDirective headerText="Terdaftar" keyField="registered" showAddButton={false} template={ColumnHeaderTemplate} />
-              <ColumnDirective headerText="Arsip" keyField="closed" showAddButton={false} template={ColumnHeaderTemplate} />
+              <ColumnDirective headerText="Drafting" keyField="drafting" allowToggle={true} showAddButton={false} template={ColumnHeaderTemplate} />
+              <ColumnDirective headerText="Tanda tangan" keyField="signed" allowToggle={true} showAddButton={false} template={ColumnHeaderTemplate} />
+              <ColumnDirective headerText="Terdaftar" keyField="registered" allowToggle={true} showAddButton={false} template={ColumnHeaderTemplate} />
+              <ColumnDirective headerText="Arsip" keyField="closed" allowToggle={true} showAddButton={false} template={ColumnHeaderTemplate} />
             </ColumnsDirective>
           </KanbanComponent>
         </div>
       </div>
-    </>
+    </div>
   );
 }

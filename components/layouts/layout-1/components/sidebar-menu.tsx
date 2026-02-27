@@ -1,8 +1,9 @@
 'use client';
 
-import { JSX, useCallback } from 'react';
-import { MENU_SIDEBAR } from '@/config/layout-1.config';
+import { JSX, useCallback, useMemo } from 'react';
+import { MENU_SIDEBAR_COMPACT } from '@/config/layout-10.config';
 import { MenuConfig, MenuItem } from '@/config/types';
+import { useAuth } from '@/providers/auth-provider';
 import { cn } from '@/lib/utils';
 import {
   AccordionMenu,
@@ -19,24 +20,34 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 
+function filterMenuByRole(items: MenuConfig, roleName: string | undefined): MenuConfig {
+  return items.filter((item) => !item.requiredRole || item.requiredRole === roleName);
+}
+
 export function SidebarMenu() {
   const pathname = usePathname();
+  const { user } = useAuth();
+  const menu = useMemo(
+    () => filterMenuByRole(MENU_SIDEBAR_COMPACT, user?.role_name),
+    [user?.role_name],
+  );
 
   // Memoize matchPath to prevent unnecessary re-renders
   const matchPath = useCallback(
     (path: string): boolean =>
-      path === pathname || (path.length > 1 && pathname.startsWith(path) && path !== '/layout-1'),
+      path === pathname || (path.length > 1 && pathname.startsWith(path)),
     [pathname],
   );
 
-  // Global classNames for consistent styling
+  // Global classNames for consistent styling (as in Metronic Layout1)
   const classNames: AccordionMenuClassNames = {
     root: 'lg:ps-1 space-y-3',
     group: 'gap-px',
     label:
       'uppercase text-xs font-medium text-muted-foreground/70 pt-2.25 pb-px',
     separator: '',
-    item: 'h-8 hover:bg-transparent text-accent-foreground hover:text-primary data-[selected=true]:text-primary data-[selected=true]:bg-muted data-[selected=true]:font-medium',
+    item:
+      'h-8 hover:bg-transparent text-accent-foreground hover:text-primary data-[selected=true]:text-primary data-[selected=true]:bg-muted data-[selected=true]:font-medium',
     sub: '',
     subTrigger:
       'h-8 hover:bg-transparent text-accent-foreground hover:text-primary data-[selected=true]:text-primary data-[selected=true]:bg-muted data-[selected=true]:font-medium',
@@ -85,7 +96,7 @@ export function SidebarMenu() {
         >
           <Link
             href={item.path || '#'}
-            className="flex items-center justify-between grow gap-2"
+            className="flex items-center grow gap-2"
           >
             {item.icon && <item.icon data-slot="accordion-menu-icon" />}
             <span data-slot="accordion-menu-title">{item.title}</span>
@@ -220,7 +231,7 @@ export function SidebarMenu() {
         collapsible
         classNames={classNames}
       >
-        {buildMenu(MENU_SIDEBAR)}
+        {buildMenu(menu)}
       </AccordionMenu>
     </ScrollArea>
   );

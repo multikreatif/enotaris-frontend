@@ -8,16 +8,22 @@ import { Main } from './components/main';
 export async function generateMetadata(): Promise<Metadata> {
   // You can access route params here if needed
   // const { params } = props;
-  
+
   return {
     title: 'Dashboard | Metronic',
     description: 'Central Hub for Personal Customization',
   };
 }
 
-export function Layout1({ children }: { children: React.ReactNode }) {
+export function Layout1({
+  children,
+  defaultSidebarTheme = 'light',
+}: {
+  children: React.ReactNode;
+  defaultSidebarTheme?: 'light' | 'dark';
+}) {
   return (
-    <LayoutProvider>
+    <LayoutProvider defaultSidebarTheme={defaultSidebarTheme}>
       <Main>
         {children}
       </Main>

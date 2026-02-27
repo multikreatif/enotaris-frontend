@@ -37,6 +37,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Plus, Eye, Search, CalendarDays } from 'lucide-react';
 import { KTDataTable } from '@keenthemes/ktui';
+import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { id } from 'date-fns/locale';
 import type { DateRange } from 'react-day-picker';
@@ -110,7 +111,7 @@ export function CasesList({
       roots.forEach((root) => {
         try {
           root.unmount();
-        } catch (_) {}
+        } catch (_) { }
       });
       roots.clear();
     };
@@ -212,18 +213,21 @@ export function CasesList({
       unmountActionRoots();
       try {
         dt.off('draw', drawEventId);
-      } catch (_) {}
+      } catch (_) { }
       try {
         dt.dispose();
-      } catch (_) {}
+      } catch (_) { }
       datatableRef.current = null;
     };
   }, [token, category, statusFilter, dateFrom, dateTo, router]);
 
   const handleCreateSuccess = () => {
     setCreateOpen(false);
+    toast.success('Data berhasil ditambahkan');
     if (datatableRef.current) {
-      datatableRef.current.reload();
+      setTimeout(() => {
+        datatableRef.current?.reload();
+      }, 300);
     }
   };
 

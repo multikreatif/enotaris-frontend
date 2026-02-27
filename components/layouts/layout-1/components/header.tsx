@@ -54,17 +54,17 @@ export function Header() {
       )}
     >
       <div className="container-fluid flex justify-between items-stretch lg:gap-4">
-        {/* HeaderLogo */}
-        <div className="flex lg:hidden items-center gap-2.5">
-          <Link href="/" className="shrink-0">
-            <img
-              src={toAbsoluteUrl('/media/app/mini-logo.svg')}
-              className="h-[25px] w-full"
-              alt="mini-logo"
-            />
-          </Link>
-          <div className="flex items-center">
-            {mobileMode && (
+        {/* HeaderLogo (mobile only) */}
+        {mobileMode && (
+          <div className="flex items-center gap-2.5">
+            <Link href="/" className="shrink-0">
+              <img
+                src={toAbsoluteUrl('/media/app/mini-logo.svg')}
+                className="h-[25px] w-full"
+                alt="mini-logo"
+              />
+            </Link>
+            <div className="flex items-center">
               <Sheet
                 open={isSidebarSheetOpen}
                 onOpenChange={setIsSidebarSheetOpen}
@@ -85,8 +85,7 @@ export function Header() {
                   </SheetBody>
                 </SheetContent>
               </Sheet>
-            )}
-            {mobileMode && (
+
               <Sheet
                 open={isMegaMenuSheetOpen}
                 onOpenChange={setIsMegaMenuSheetOpen}
@@ -107,9 +106,9 @@ export function Header() {
                   </SheetBody>
                 </SheetContent>
               </Sheet>
-            )}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Mega Menu */}
         {!mobileMode && (
