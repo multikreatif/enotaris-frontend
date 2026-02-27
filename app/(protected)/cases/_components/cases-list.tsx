@@ -225,9 +225,7 @@ export function CasesList({
     setCreateOpen(false);
     toast.success('Data berhasil ditambahkan');
     if (datatableRef.current) {
-      setTimeout(() => {
-        datatableRef.current?.reload();
-      }, 300);
+      datatableRef.current.reload();
     }
   };
 

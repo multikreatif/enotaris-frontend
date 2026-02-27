@@ -162,3 +162,30 @@ html {
 
 /* Metronic Configs */
 @import './config.metronic.css';
+
+/** Syncfusion Kanban - dark mode overrides */
+@layer base {
+  .dark .e-kanban,
+  .dark .e-kanban .e-kanban-header,
+  .dark .e-kanban .e-kanban-content,
+  .dark .e-kanban .e-kanban-table,
+  .dark .e-kanban .e-content-row,
+  .dark .e-kanban .e-content-cells {
+    background-color: var(--background) !important;
+    color: var(--foreground) !important;
+    border-color: var(--border) !important;
+  }
+
+  .dark .e-kanban .e-header-cells,
+  .dark .e-kanban .e-header-title {
+    background-color: var(--muted) !important;
+    color: var(--foreground) !important;
+    border-color: var(--border) !important;
+  }
+
+  .dark .e-kanban .e-card {
+    background-color: var(--card) !important;
+    color: var(--card-foreground) !important;
+    border-color: var(--border) !important;
+  }
+}
