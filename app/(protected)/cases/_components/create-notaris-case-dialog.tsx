@@ -30,18 +30,21 @@ import {
   type JenisPekerjaanResponse,
 } from '@/lib/api';
 import type { UserResponse } from '@/lib/auth-types';
-import { FileText, UserCircle, MapPin } from 'lucide-react';
+import { FileText, UserCircle } from 'lucide-react';
 import { PartyListField, type PartyRow } from './party-list-field';
 import { UserSearchSelect } from './user-search-select';
 
-const PPAT_PARTY_ROLES = [
+const NOTARIS_PARTY_ROLES = [
   { value: 'primary_contact', label: 'Kontak utama' },
-  { value: 'pihak_mengalihkan', label: 'Pihak mengalihkan' },
-  { value: 'pihak_menerima', label: 'Pihak menerima' },
+  { value: 'pihak_pertama', label: 'Pihak pertama' },
+  { value: 'pihak_kedua', label: 'Pihak kedua' },
+  { value: 'pemberi_kuasa', label: 'Pemberi kuasa' },
+  { value: 'penerima_kuasa', label: 'Penerima kuasa' },
+  { value: 'saksi', label: 'Saksi' },
   { value: 'lainnya', label: 'Lainnya' },
 ] as const;
 
-export function CreatePPATCaseDialog({
+export function CreateNotarisCaseDialog({
   open,
   onOpenChange,
   token,
@@ -55,17 +58,14 @@ export function CreatePPATCaseDialog({
   const [clients, setClients] = useState<ClientResponse[]>([]);
   const [users, setUsers] = useState<UserResponse[]>([]);
   const [loadingClients, setLoadingClients] = useState(false);
-  const [nomorAkta, setNomorAkta] = useState('');
-  const [tanggalAkta, setTanggalAkta] = useState('');
-  const [parties, setParties] = useState<PartyRow[]>([]);
-  const [jenisPekerjaan, setJenisPekerjaan] = useState('');
+  const [nomorDraft, setNomorDraft] = useState('');
+  const [tanggalMulai, setTanggalMulai] = useState('');
+  const [targetSelesai, setTargetSelesai] = useState('');
+  const [jenisPekerjaanId, setJenisPekerjaanId] = useState('');
   const [stafId, setStafId] = useState('');
-  const [luasTanah, setLuasTanah] = useState('');
-  const [luasBangunan, setLuasBangunan] = useState('');
-  const [hargaTransaksi, setHargaTransaksi] = useState<number | null>(null);
-  const [njop, setNjop] = useState<number | null>(null);
-  const [nop, setNop] = useState('');
-  const [tahunNop, setTahunNop] = useState('');
+  const [namaParaPihak, setNamaParaPihak] = useState('');
+  const [nilaiTransaksi, setNilaiTransaksi] = useState<number | null>(null);
+  const [taskNamesText, setTaskNamesText] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [addClientOpen, setAddClientOpen] = useState<number | null>(null);
@@ -75,6 +75,8 @@ export function CreatePPATCaseDialog({
   const [documentTemplateId, setDocumentTemplateId] = useState('');
   const [jenisPekerjaanList, setJenisPekerjaanList] = useState<JenisPekerjaanResponse[]>([]);
 
+  const [parties, setParties] = useState<PartyRow[]>([]);
+
   const loadData = useCallback(async () => {
     if (!token) return;
     setLoadingClients(true);
@@ -82,9 +84,9 @@ export function CreatePPATCaseDialog({
       const [c, u, t, dt, jp] = await Promise.all([
         getClientsApi(token, { limit: 500 }),
         getUsersApi(token),
-        getWorkflowTemplatesApi(token, { category: 'ppat' }),
-        getDocumentRequirementTemplatesApi(token, { category: 'ppat' }),
-        getJenisPekerjaanApi(token, { category: 'ppat' }),
+        getWorkflowTemplatesApi(token, { category: 'notaris' }),
+        getDocumentRequirementTemplatesApi(token, { category: 'notaris' }),
+        getJenisPekerjaanApi(token, { category: 'notaris' }),
       ]);
       setClients(c.data);
       setUsers(u);
@@ -102,60 +104,54 @@ export function CreatePPATCaseDialog({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const jenisItem = jenisPekerjaanList.find((j) => j.id === jenisPekerjaan);
+    const jenisItem = jenisPekerjaanList.find((j) => j.id === jenisPekerjaanId);
     if (!jenisItem) {
-      setErr('Pilih jenis pekerjaan.');
+      setErr('Pilih jenis akta.');
       return;
     }
-    const partiesWithClient = parties.filter((p) => p.clientId.trim() !== '');
-    if (partiesWithClient.length < 2) {
-      setErr('Minimal dua pihak (dengan klien terpilih): pihak mengalihkan dan pihak menerima.');
-      return;
-    }
+    const partiesPayload = parties
+      .filter((p) => p.clientId.trim() !== '')
+      .map((p) => ({ client_id: p.clientId, role: p.role || 'lainnya' }));
+    const names = parties
+      .filter((p) => p.clientId)
+      .map((p) => clients.find((x) => x.id === p.clientId)?.full_name)
+      .filter(Boolean) as string[];
+    const namaParaPihakFinal = namaParaPihak.trim() || names.join(', ') || undefined;
+
     setSubmitting(true);
     setErr(null);
     try {
-      const partiesPayload = partiesWithClient.map((p) => ({
-        client_id: p.clientId,
-        role: p.role || 'lainnya',
-      }));
-      const names = partiesWithClient
-        .map((p) => clients.find((x) => x.id === p.clientId)?.full_name)
-        .filter(Boolean) as string[];
-      const namaParaPihak = names.join(', ') || undefined;
+      const task_names = taskNamesText
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean);
       const body: CreateCaseBody = {
-        category: 'ppat',
-        nomor_draft: nomorAkta.trim() || undefined,
-        tanggal_mulai: tanggalAkta.trim() || undefined,
-        nama_para_pihak: namaParaPihak,
+        category: 'notaris',
+        nomor_draft: nomorDraft.trim() || undefined,
+        tanggal_mulai: tanggalMulai.trim() || undefined,
+        target_selesai: targetSelesai.trim() || undefined,
+        nama_para_pihak: namaParaPihakFinal,
         jenis_akta: jenisItem.name,
-        jenis_pekerjaan_ppat: jenisItem.id,
         staf_penanggung_jawab_id: stafId || undefined,
         status: 'drafting',
-        parties: partiesPayload,
+        parties: partiesPayload.length > 0 ? partiesPayload : undefined,
+        task_names: task_names.length > 0 ? task_names : undefined,
         workflow_template_id: workflowTemplateId.trim() || undefined,
         document_requirement_template_id: documentTemplateId.trim() || undefined,
-        nilai_transaksi: hargaTransaksi ?? undefined,
-        luas_tanah_m2: luasTanah ? parseFloat(luasTanah) : undefined,
-        luas_bangunan_m2: luasBangunan ? parseFloat(luasBangunan) : undefined,
-        njop: njop ?? undefined,
-        nop: nop.trim() || undefined,
-        tahun_nop: tahunNop.trim() || undefined,
+        nilai_transaksi: nilaiTransaksi ?? undefined,
       };
       await createCaseApi(token, body);
-      setNomorAkta('');
-      setTanggalAkta('');
+      setNomorDraft('');
+      setTanggalMulai('');
+      setTargetSelesai('');
       setParties([]);
-      setJenisPekerjaan('');
+      setJenisPekerjaanId('');
       setStafId('');
+      setNamaParaPihak('');
+      setNilaiTransaksi(null);
+      setTaskNamesText('');
       setWorkflowTemplateId('');
       setDocumentTemplateId('');
-      setLuasTanah('');
-      setLuasBangunan('');
-      setHargaTransaksi(null);
-      setNjop(null);
-      setNop('');
-      setTahunNop('');
       onSuccess();
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Gagal menyimpan berkas');
@@ -180,7 +176,7 @@ export function CreatePPATCaseDialog({
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-h-[90vh] overflow-y-auto max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Tambah Berkas Akta PPAT</DialogTitle>
+            <DialogTitle>Entri Berkas Akta (Notaris)</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit}>
             <DialogBody className="space-y-6">
@@ -198,29 +194,29 @@ export function CreatePPATCaseDialog({
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="nomor_akta">Nomor akta</Label>
+                    <Label htmlFor="nomor_draft">Nomor draft</Label>
                     <Input
-                      id="nomor_akta"
-                      value={nomorAkta}
-                      onChange={(e) => setNomorAkta(e.target.value)}
-                      placeholder="Contoh: 01/AJB/2025"
+                      id="nomor_draft"
+                      value={nomorDraft}
+                      onChange={(e) => setNomorDraft(e.target.value)}
+                      placeholder="Contoh: 01/KW/2025"
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="tanggal_akta">Tanggal akta</Label>
+                    <Label htmlFor="tanggal_mulai">Tanggal mulai</Label>
                     <Input
-                      id="tanggal_akta"
+                      id="tanggal_mulai"
                       type="date"
-                      value={tanggalAkta}
-                      onChange={(e) => setTanggalAkta(e.target.value)}
+                      value={tanggalMulai}
+                      onChange={(e) => setTanggalMulai(e.target.value)}
                     />
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>Jenis pekerjaan *</Label>
-                  <Select value={jenisPekerjaan} onValueChange={setJenisPekerjaan} required>
+                  <Label>Jenis akta *</Label>
+                  <Select value={jenisPekerjaanId} onValueChange={setJenisPekerjaanId} required>
                     <SelectTrigger>
-                      <SelectValue placeholder="Pilih jenis pekerjaan" />
+                      <SelectValue placeholder="Pilih jenis akta (Notaris)" />
                     </SelectTrigger>
                     <SelectContent>
                       {jenisPekerjaanList.map((j) => (
@@ -252,7 +248,7 @@ export function CreatePPATCaseDialog({
                   <Label>Template dokumen persyaratan (opsional)</Label>
                   <Select value={documentTemplateId || '_none'} onValueChange={(v) => setDocumentTemplateId(v === '_none' ? '' : v)}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Tanpa template — gunakan default atau sesuai jenis pekerjaan" />
+                      <SelectValue placeholder="Tanpa template" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="_none">Tanpa template</SelectItem>
@@ -265,18 +261,45 @@ export function CreatePPATCaseDialog({
                   </Select>
                   <p className="text-xs text-muted-foreground">Tab Dokumen di berkas ini akan menampilkan daftar persyaratan dari template yang dipilih.</p>
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="nama_para_pihak">Nama para pihak (ringkasan)</Label>
+                  <Input
+                    id="nama_para_pihak"
+                    value={namaParaPihak}
+                    onChange={(e) => setNamaParaPihak(e.target.value)}
+                    placeholder="Contoh: Budi Santoso dengan PT ABC — otomatis dari pihak di bawah jika kosong"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="target_selesai">Target selesai (opsional)</Label>
+                  <Input
+                    id="target_selesai"
+                    type="date"
+                    value={targetSelesai}
+                    onChange={(e) => setTargetSelesai(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="nilai_transaksi">Nilai transaksi (Rp, opsional)</Label>
+                  <CurrencyInput
+                    id="nilai_transaksi"
+                    value={nilaiTransaksi}
+                    onChange={setNilaiTransaksi}
+                    placeholder="0"
+                  />
+                </div>
               </section>
 
               <PartyListField
                 parties={parties}
                 onPartiesChange={setParties}
-                roleOptions={PPAT_PARTY_ROLES}
-                defaultRole="pihak_mengalihkan"
+                roleOptions={NOTARIS_PARTY_ROLES}
+                defaultRole="pihak_pertama"
                 clients={clients}
                 loadingClients={loadingClients}
                 onAddClientForIndex={(index) => setAddClientOpen(index)}
                 sectionTitle="Pihak dalam Akta"
-                sectionDescription="Minimal dua pihak: pihak mengalihkan dan pihak menerima. Klik Tambah pihak untuk menambah."
+                sectionDescription="Tambahkan pihak-pihak yang terlibat dalam akta. Klik Tambah pihak untuk menambah baris."
                 clientPlaceholder="Pilih klien"
                 minRows={0}
               />
@@ -288,7 +311,7 @@ export function CreatePPATCaseDialog({
                   Penanggung jawab
                 </h3>
                 <div className="space-y-2">
-                  <Label>Person in charge (staf)</Label>
+                  <Label>Staf penanggung jawab (PIC)</Label>
                   <UserSearchSelect
                     value={stafId}
                     onValueChange={setStafId}
@@ -299,67 +322,16 @@ export function CreatePPATCaseDialog({
                 </div>
               </section>
 
-              {/* Section: Objek & nilai */}
+              {/* Section: Tahapan (jika tidak pakai template workflow) */}
               <section className="rounded-xl border border-border bg-muted/30 p-4 space-y-4">
-                <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                  <MapPin className="size-4 text-muted-foreground" />
-                  Objek dan nilai
-                </h3>
-                <p className="text-xs text-muted-foreground">Luas, nilai transaksi, dan data pajak (opsional)</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="luas_tanah">Luas tanah (m²)</Label>
-                    <Input
-                      id="luas_tanah"
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={luasTanah}
-                      onChange={(e) => setLuasTanah(e.target.value)}
-                      placeholder="0"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="luas_bangunan">Luas bangunan (m²)</Label>
-                    <Input
-                      id="luas_bangunan"
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={luasBangunan}
-                      onChange={(e) => setLuasBangunan(e.target.value)}
-                      placeholder="0"
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="harga_transaksi">Harga transaksi (Rp)</Label>
-                  <CurrencyInput
-                    id="harga_transaksi"
-                    value={hargaTransaksi}
-                    onChange={setHargaTransaksi}
-                    placeholder="0"
-                  />
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="njop">NJOP (Rp)</Label>
-                    <CurrencyInput
-                      id="njop"
-                      value={njop}
-                      onChange={setNjop}
-                      placeholder="0"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="nop">NOP</Label>
-                    <Input id="nop" value={nop} onChange={(e) => setNop(e.target.value)} placeholder="Nomor objek pajak" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="tahun_nop">Tahun NOP</Label>
-                    <Input id="tahun_nop" value={tahunNop} onChange={(e) => setTahunNop(e.target.value)} placeholder="2025" />
-                  </div>
-                </div>
+                <h3 className="text-sm font-semibold text-foreground">Tahapan (opsional)</h3>
+                <p className="text-xs text-muted-foreground">Satu tahapan per baris. Kosongkan jika menggunakan template workflow.</p>
+                <textarea
+                  className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={taskNamesText}
+                  onChange={(e) => setTaskNamesText(e.target.value)}
+                  placeholder="Terima dokumen&#10;Draft akta&#10;Tanda tangan&#10;Arsip minuta"
+                />
               </section>
             </DialogBody>
             <DialogFooter className="gap-2 sm:gap-0">

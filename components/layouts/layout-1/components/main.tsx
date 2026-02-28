@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useLayout } from './context';
+import { OfficeBar } from '@/components/layouts/layout-10/components/office-bar';
 import { Footer } from './footer';
 import { Header } from './header';
 import { Sidebar } from './sidebar';
@@ -48,6 +49,7 @@ export function Main({ children }: { children: React.ReactNode }) {
 
       <div className="wrapper flex grow flex-col">
         <Header />
+        <OfficeBar />
 
         <main className="grow pt-5" role="content">
           {children}

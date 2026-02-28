@@ -28,9 +28,12 @@ export const MENU_SIDEBAR_COMPACT: MenuConfig = [
     path: '/documents',
   },
   {
-    title: 'Digital Protocol',
+    title: 'Digital Protokol',
     icon: FileText,
-    path: '/protocol',
+    children: [
+      { title: 'Repertorium', path: '/protocol', badge: 'Notaris' },
+      { title: 'Buku Klapper', path: '/klapper', badge: 'Notaris' },
+    ],
   },
   {
     title: 'Tugas / Task',
@@ -351,12 +354,13 @@ export const MENU_ROOT: MenuConfig = [
   { title: 'Manajemen Klien', icon: UserCircle, rootPath: '/clients', path: '/clients', childrenIndex: 2 },
   { title: 'Tugas / Task', icon: ListTodo, rootPath: '/tasks', path: '/tasks', childrenIndex: 3 },
   { title: 'Kalender', icon: Calendar, rootPath: '/calendar', path: '/calendar', childrenIndex: 4 },
+  { title: 'Digital Protokol', icon: FileText, rootPaths: ['/protocol', '/klapper'], path: '/protocol', childrenIndex: 4 },
   {
     title: 'Administrator',
     icon: Settings,
     rootPaths: ['/users', '/jenis-pekerjaan', '/profile-notaris'],
     path: '/users',
-    childrenIndex: 5,
+    childrenIndex: 7,
     requiredRole: 'admin',
   },
 ];

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -31,7 +31,9 @@ import {
   AlertCircle,
   Eye,
   XCircle,
+  Loader2,
 } from 'lucide-react';
+import { PDFDocument } from 'pdf-lib';
 import { cn } from '@/lib/utils';
 import {
   getDocumentsApi,
@@ -59,8 +61,21 @@ const FALLBACK_REQUIREMENT_TYPES: { id: string; name: string; category: string }
 const REPOSITORI_TYPE_OPTIONS = [
   { id: 'draft_akta', name: 'Draft Akta', category: 'AKTA' },
   { id: 'minuta', name: 'Minuta', category: 'AKTA' },
+  { id: 'salinan', name: 'Salinan', category: 'AKTA' },
   { id: 'lainnya', name: 'Lainnya', category: 'REPOSITORI' },
 ];
+
+const REPOSITORI_TYPE_IDS = ['draft_akta', 'minuta', 'salinan', 'lainnya'] as const;
+
+/** Mengambil tipe repositori dari object key (path). Key bisa: .../repositori/draft_akta/file.pdf atau .../repositori/file.pdf */
+function getRepositoriTypeFromKey(key: string): string {
+  const idx = key.indexOf('repositori/');
+  if (idx === -1) return 'lainnya';
+  const after = key.slice(idx + 'repositori/'.length);
+  const seg = after.split('/')[0];
+  if (REPOSITORI_TYPE_IDS.includes(seg as (typeof REPOSITORI_TYPE_IDS)[number])) return seg;
+  return seg && !seg.includes('.') ? seg : 'lainnya';
+}
 
 function getFileExt(filename: string): string {
   const i = filename.lastIndexOf('.');
@@ -75,11 +90,13 @@ export interface CaseDocumentTabProps {
   userRole?: string;
   /** Current user display name (optional) */
   currentUserName?: string;
+  /** Nama klien primary untuk penamaan file bundle PDF */
+  primaryClientName?: string;
 }
 
 type RequirementType = { id: string; name: string; category: string };
 
-export function CaseDocumentTab({ caseId, token, picName = '-', userRole, currentUserName }: CaseDocumentTabProps) {
+export function CaseDocumentTab({ caseId, token, picName = '-', userRole, currentUserName, primaryClientName }: CaseDocumentTabProps) {
   const [docSubView, setDocSubView] = useState<'persyaratan' | 'repositori'>('persyaratan');
   const [requirementItems, setRequirementItems] = useState<DocumentRequirementTemplateItemResponse[]>([]);
   const [documentEntries, setDocumentEntries] = useState<CaseDocumentEntryItem[]>([]);
@@ -102,7 +119,14 @@ export function CaseDocumentTab({ caseId, token, picName = '-', userRole, curren
   const [rejectSubmitting, setRejectSubmitting] = useState(false);
   const [inspectEntry, setInspectEntry] = useState<CaseDocumentEntryItem | null>(null);
   const [inspectDocumentName, setInspectDocumentName] = useState('');
+  /** Entry IDs selected for bundle PDF download (hanya entry yang punya presign_url). */
+  const [selectedForBundle, setSelectedForBundle] = useState<Set<string>>(new Set());
+  /** Document keys (d.key) selected for bundle dari Dokumen Lainnya. */
+  const [selectedLainnyaForBundle, setSelectedLainnyaForBundle] = useState<Set<string>>(new Set());
+  const [bundleDownloading, setBundleDownloading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  /** Ketika upload dibuka dari baris persyaratan, simpan item_key agar di step 2 jenis dokumen tetap terpilih. */
+  const uploadPreselectedKeyRef = useRef<string | undefined>(undefined);
   const isNotaris = userRole?.toLowerCase() === 'notaris';
 
   const requirementTypes: RequirementType[] = requirementItems.length > 0
@@ -146,14 +170,119 @@ export function CaseDocumentTab({ caseId, token, picName = '-', userRole, curren
     loadDocuments();
   }, [loadDocuments]);
 
+  // Saat masuk step 2, pastikan uploadDocType ada di documentTypeOptions agar Select menampilkan nilai terpilih.
+  useEffect(() => {
+    if (uploadOpen && uploadStep === 2 && uploadFile && documentTypeOptions.length > 0) {
+      const exists = documentTypeOptions.some((o) => o.id === uploadDocType);
+      if (!exists) {
+        const fallback = uploadPreselectedKeyRef.current && documentTypeOptions.some((o) => o.id === uploadPreselectedKeyRef.current)
+          ? uploadPreselectedKeyRef.current
+          : documentTypeOptions[0]?.id ?? '';
+        setUploadDocType(fallback);
+      }
+    }
+  }, [uploadOpen, uploadStep, uploadFile, documentTypeOptions, uploadDocType]);
+
   const entryByItem = entriesByItemKey(documentEntries);
   const verifiedCount = requirementTypes.filter((r) => entryByItem[r.id]?.verification_status === 'verified').length;
   const totalRequirementCount = requirementTypes.length;
 
-  const openUpload = () => {
+  const toggleSelectedForBundle = (entryId: string) => {
+    setSelectedForBundle((prev) => {
+      const next = new Set(prev);
+      if (next.has(entryId)) next.delete(entryId);
+      else next.add(entryId);
+      return next;
+    });
+  };
+
+  const toggleLainnyaForBundle = (docKey: string) => {
+    setSelectedLainnyaForBundle((prev) => {
+      const next = new Set(prev);
+      if (next.has(docKey)) next.delete(docKey);
+      else next.add(docKey);
+      return next;
+    });
+  };
+
+  const getExtFromKeyOrName = (keyOrName: string) => {
+    const i = keyOrName.lastIndexOf('.');
+    return i >= 0 ? keyOrName.slice(i + 1).toLowerCase() : '';
+  };
+
+  /** Menambahkan satu file (buffer + ext) ke mergedPdf. */
+  const addToMergedPdf = async (
+    mergedPdf: Awaited<ReturnType<typeof PDFDocument.create>>,
+    buf: ArrayBuffer,
+    ext: string
+  ) => {
+    if (ext === 'pdf') {
+      const src = await PDFDocument.load(buf);
+      const pages = await mergedPdf.copyPages(src, src.getPageIndices());
+      pages.forEach((p) => mergedPdf.addPage(p));
+    } else if (ext === 'jpg' || ext === 'jpeg' || ext === 'png') {
+      const page = mergedPdf.addPage();
+      const { width, height } = page.getSize();
+      if (ext === 'png') {
+        const img = await mergedPdf.embedPng(buf);
+        const scale = Math.min(width / img.width, height / img.height, 1);
+        page.drawImage(img, { x: 0, y: height - img.height * scale, width: img.width * scale, height: img.height * scale });
+      } else {
+        const img = await mergedPdf.embedJpg(buf);
+        const scale = Math.min(width / img.width, height / img.height, 1);
+        page.drawImage(img, { x: 0, y: height - img.height * scale, width: img.width * scale, height: img.height * scale });
+      }
+    }
+  };
+
+  /** Unduh dokumen terpilih (persyaratan + dokumen lainnya) sebagai satu bundle PDF. Urutan: persyaratan dulu, lalu lainnya. */
+  const handleDownloadBundle = useCallback(async () => {
+    const entryIds = new Set(selectedForBundle);
+    const entries = requirementTypes
+      .map((r) => entryByItem[r.id])
+      .filter((e): e is CaseDocumentEntryItem => !!e && entryIds.has(e.id) && !!e.presign_url);
+    const lainnyaKeys = new Set(selectedLainnyaForBundle);
+    const lainnyaItems = (repositoriByType.lainnya ?? []).filter((d) => lainnyaKeys.has(d.key) && d.url);
+    if (entries.length === 0 && lainnyaItems.length === 0) return;
+    setBundleDownloading(true);
+    try {
+      const mergedPdf = await PDFDocument.create();
+      for (const entry of entries) {
+        const res = await fetch(entry.presign_url);
+        if (!res.ok) continue;
+        const buf = await res.arrayBuffer();
+        const ext = getExtFromKeyOrName(entry.file_key);
+        await addToMergedPdf(mergedPdf, buf, ext);
+      }
+      for (const d of lainnyaItems) {
+        const res = await fetch(d.url);
+        if (!res.ok) continue;
+        const buf = await res.arrayBuffer();
+        const ext = getExtFromKeyOrName(d.file_name);
+        await addToMergedPdf(mergedPdf, buf, ext);
+      }
+      const blob = await mergedPdf.save();
+      const url = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
+      const a = document.createElement('a');
+      a.href = url;
+      const prefix = (primaryClientName ?? '').trim().replace(/[^\p{L}\p{N}\s-_]/gu, '').replace(/\s+/g, '_') || 'Dokumen';
+      a.download = `${prefix}-persyaratan-bundle-${caseId}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Gagal membuat bundle PDF');
+    } finally {
+      setBundleDownloading(false);
+    }
+  }, [requirementTypes, entryByItem, selectedForBundle, selectedLainnyaForBundle, repositoriByType, primaryClientName, caseId]);
+
+  /** Open upload dialog. Pass itemKey when triggered from a requirement row so jenis dokumen is pre-selected in step 2. */
+  const openUpload = (preselectedItemKey?: string) => {
     setUploadStep(1);
     setUploadFile(null);
-    setUploadDocType(requirementTypes[0]?.id ?? REPOSITORI_TYPE_OPTIONS[0]?.id ?? '');
+    const initialDocType = preselectedItemKey ?? requirementTypes[0]?.id ?? REPOSITORI_TYPE_OPTIONS[0]?.id ?? '';
+    setUploadDocType(initialDocType);
+    uploadPreselectedKeyRef.current = preselectedItemKey;
     setUploadPhysical(false);
     setUploadNotes('');
     setUploadErr(null);
@@ -165,6 +294,7 @@ export function CaseDocumentTab({ caseId, token, picName = '-', userRole, curren
     setUploadFile(null);
     setUploadStep(1);
     setUploadErr(null);
+    uploadPreselectedKeyRef.current = undefined;
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -192,6 +322,10 @@ export function CaseDocumentTab({ caseId, token, picName = '-', userRole, curren
     }
     setUploadFile(file);
     setUploadStep(2);
+    // Pastikan jenis dokumen tetap terpilih saat masuk step 2 (dari baris persyaratan).
+    if (uploadPreselectedKeyRef.current) {
+      setUploadDocType(uploadPreselectedKeyRef.current);
+    }
   }
 
   const handleUploadSubmit = async () => {
@@ -199,13 +333,17 @@ export function CaseDocumentTab({ caseId, token, picName = '-', userRole, curren
     const isPersyaratan = requirementTypes.some((r) => r.id === uploadDocType);
     const folder = isPersyaratan
       ? `cases/${caseId}/persyaratan/${uploadDocType}`
-      : `cases/${caseId}/repositori`;
+      : `cases/${caseId}/repositori/${uploadDocType}`;
     setUploadSubmitting(true);
     setUploadErr(null);
     try {
       const uploaded = await uploadDocumentApi(token, uploadFile, { folder });
       if (isPersyaratan) {
-        await createCaseDocumentEntryApi(token, caseId, { item_key: uploadDocType, file_key: uploaded.key });
+        const createRes = await createCaseDocumentEntryApi(token, caseId, { item_key: uploadDocType, file_key: uploaded.key });
+        const createdData = createRes?.data as { id?: string } | undefined;
+        if (uploadPhysical && createdData?.id) {
+          await patchCaseDocumentEntryApi(token, caseId, createdData.id, { physical_received: true });
+        }
         await loadDocuments();
       } else {
         setRepositoriDocs((prev) => [uploaded, ...prev]);
@@ -319,6 +457,17 @@ export function CaseDocumentTab({ caseId, token, picName = '-', userRole, curren
       )
     : repositoriDocs;
 
+  /** Dokumen repositori dikelompokkan per tipe: draft_akta, minuta, salinan, lainnya */
+  const repositoriByType = useMemo(() => {
+    const map: Record<string, DocumentItem[]> = { draft_akta: [], minuta: [], salinan: [], lainnya: [] };
+    filteredRepositori.forEach((d) => {
+      const type = getRepositoriTypeFromKey(d.key);
+      if (map[type]) map[type].push(d);
+      else map.lainnya.push(d);
+    });
+    return map;
+  }, [filteredRepositori]);
+
   return (
     <div className="flex gap-6">
       {/* Sidebar: Manajemen File */}
@@ -394,10 +543,27 @@ export function CaseDocumentTab({ caseId, token, picName = '-', userRole, curren
                   {verifiedCount} dari {totalRequirementCount} dokumen tervalidasi
                 </p>
               </div>
-              <Button size="sm" className="ml-auto" onClick={openUpload}>
-                <UploadCloud className="me-2 size-4" />
-                Unggah Dokumen
-              </Button>
+              <div className="ml-auto flex items-center gap-2">
+                {(selectedForBundle.size > 0 || selectedLainnyaForBundle.size > 0) && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleDownloadBundle}
+                    disabled={bundleDownloading}
+                  >
+                    {bundleDownloading ? (
+                      <Loader2 className="me-2 size-4 animate-spin" />
+                    ) : (
+                      <Download className="me-2 size-4" />
+                    )}
+                    Download (PDF)
+                  </Button>
+                )}
+                <Button size="sm" onClick={openUpload}>
+                  <UploadCloud className="me-2 size-4" />
+                  Unggah Dokumen
+                </Button>
+              </div>
             </div>
 
             {/* Table */}
@@ -408,6 +574,7 @@ export function CaseDocumentTab({ caseId, token, picName = '-', userRole, curren
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                      <th className="w-10 pb-3 font-medium text-center">Pilih</th>
                       <th className="pb-3 font-medium">Nama Dokumen</th>
                       <th className="pb-3 font-medium">Status</th>
                       <th className="pb-3 font-medium">Fisik</th>
@@ -422,6 +589,19 @@ export function CaseDocumentTab({ caseId, token, picName = '-', userRole, curren
                       const isRejected = entry?.verification_status === 'rejected';
                       return (
                         <tr key={req.id} className="border-b border-border/80">
+                          <td className="py-3 text-center">
+                            {entry?.presign_url ? (
+                              <input
+                                type="checkbox"
+                                checked={selectedForBundle.has(entry.id)}
+                                onChange={() => toggleSelectedForBundle(entry.id)}
+                                className="size-4 rounded border-border"
+                                aria-label={`Pilih ${req.name} untuk bundle PDF`}
+                              />
+                            ) : (
+                              <span className="inline-block size-4" aria-hidden />
+                            )}
+                          </td>
                           <td className="py-3">
                             <div className="flex items-center gap-2">
                               <FileText className="size-4 shrink-0 text-muted-foreground" />
@@ -531,8 +711,8 @@ export function CaseDocumentTab({ caseId, token, picName = '-', userRole, curren
                                 variant="ghost"
                                 size="sm"
                                 className="gap-1.5"
-                                onClick={openUpload}
-                                title="Unggah dokumen"
+                                onClick={() => openUpload(req.id)}
+                                title={`Unggah dokumen: ${req.name}`}
                               >
                                 <UploadCloud className="size-4" />
                                 Unggah
@@ -546,78 +726,204 @@ export function CaseDocumentTab({ caseId, token, picName = '-', userRole, curren
                 </table>
               </div>
             )}
+
+            {/* Dokumen Lainnya — dipisah dari persyaratan terdefinisi di atas */}
+            {(repositoriByType.lainnya?.length ?? 0) > 0 && (
+              <div className="mt-8 border-t border-border pt-6">
+                <h4 className="mb-1 text-sm font-semibold text-foreground">Dokumen Lainnya</h4>
+                <p className="mb-4 text-xs text-muted-foreground">
+                  Dokumen tambahan di luar daftar persyaratan yang terdefinisi di atas.
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                        <th className="w-10 pb-3 font-medium text-center">Pilih</th>
+                        <th className="pb-3 font-medium">Nama File</th>
+                        <th className="pb-3 font-medium">Jenis</th>
+                        <th className="pb-3 font-medium">Tanggal Unggah</th>
+                        <th className="pb-3 font-medium text-right">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(repositoriByType.lainnya ?? []).map((d) => {
+                        const ext = getFileExt(d.file_name);
+                        const isPdf = ext === 'PDF';
+                        const canBundle = ['PDF', 'JPG', 'JPEG', 'PNG'].includes(ext);
+                        return (
+                          <tr key={d.key} className="border-b border-border/80">
+                            <td className="py-3 text-center">
+                              {canBundle && d.url ? (
+                                <input
+                                  type="checkbox"
+                                  checked={selectedLainnyaForBundle.has(d.key)}
+                                  onChange={() => toggleLainnyaForBundle(d.key)}
+                                  className="size-4 rounded border-border"
+                                  aria-label={`Pilih ${d.file_name} untuk bundle PDF`}
+                                />
+                              ) : (
+                                <span className="inline-block size-4" aria-hidden />
+                              )}
+                            </td>
+                            <td className="py-3">
+                              <div className="flex items-center gap-2">
+                                <div
+                                  className={cn(
+                                    'flex size-9 shrink-0 items-center justify-center rounded-md text-xs font-semibold text-white',
+                                    isPdf ? 'bg-orange-500' : 'bg-primary',
+                                  )}
+                                >
+                                  {ext}
+                                </div>
+                                <p className="truncate font-medium max-w-[240px] sm:max-w-none">{d.file_name}</p>
+                              </div>
+                            </td>
+                            <td className="py-3 text-muted-foreground">{ext}</td>
+                            <td className="py-3 text-muted-foreground">
+                              {new Date(d.uploaded_at).toLocaleDateString('id-ID', {
+                                day: 'numeric',
+                                month: 'short',
+                                year: 'numeric',
+                              })}
+                            </td>
+                            <td className="py-3 text-right">
+                              <a
+                                href={d.url}
+                                target="_blank"
+                                rel="noreferrer noopener"
+                                download
+                                className="inline-flex items-center justify-center rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-primary"
+                                title="Unduh"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <Download className="size-4" />
+                              </a>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </section>
         )}
 
         {docSubView === 'repositori' && (
           <section className="rounded-xl border border-border bg-card p-5">
-            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <h3 className="text-sm font-semibold">Repositori Akta</h3>
-              <div className="flex items-center gap-2">
+            {/* Bar atas: judul + deskripsi kiri, cari + tombol unggah kanan (mengikuti layout Persyaratan) */}
+            <div className="mb-6 flex items-center gap-4">
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm font-semibold text-foreground">Repositori Akta</h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Draft akta, minuta, salinan, dan dokumen produk akta lainnya.
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     placeholder="Cari nama dokumen..."
-                    className="pl-8 w-48 sm:w-56"
+                    className="h-9 w-44 pl-8 sm:w-52"
                   />
                 </div>
-                <Button size="sm" onClick={openUpload}>
-                  <UploadCloud className="me-2 size-4" />
-                  Unggah
+                <Button size="sm" onClick={openUpload} className="gap-2">
+                  <UploadCloud className="size-4" />
+                  Unggah Dokumen
                 </Button>
               </div>
             </div>
-            <p className="mb-4 text-xs text-muted-foreground">
-              Draft akta, minuta, salinan, dan dokumen produk akta lainnya.
-            </p>
+
             {loading ? (
               <p className="text-sm text-muted-foreground">Memuat dokumen...</p>
             ) : filteredRepositori.length === 0 ? (
-              <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+              <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-muted/20 py-12 text-center">
                 <FolderOpen className="size-12 text-muted-foreground" />
-                <p className="text-sm font-medium">Belum ada dokumen di repositori.</p>
+                <p className="text-sm font-medium text-foreground">Belum ada dokumen di repositori.</p>
                 <p className="text-xs text-muted-foreground">
-                  Klik &quot;Unggah&quot; untuk menambah draft akta atau minuta.
+                  Gunakan tombol &quot;Unggah Dokumen&quot; di atas. Pilih jenis: Draft Akta, Minuta, atau Salinan.
                 </p>
               </div>
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {filteredRepositori.map((d) => {
-                  const ext = getFileExt(d.file_name);
-                  const isPdf = ext === 'PDF';
+              <div className="space-y-8">
+                {(['draft_akta', 'minuta', 'salinan'] as const).map((typeKey) => {
+                  const list = repositoriByType[typeKey] ?? [];
+                  const label = typeKey === 'draft_akta' ? 'Draft Akta' : typeKey === 'minuta' ? 'Minuta' : typeKey === 'salinan' ? 'Salinan' : 'Lainnya';
                   return (
-                    <div
-                      key={d.key}
-                      className="flex items-start gap-3 rounded-xl border border-border bg-muted/20 p-4 shadow-sm transition-shadow hover:shadow-md"
-                    >
-                      <div
-                        className={cn(
-                          'flex size-12 shrink-0 items-center justify-center rounded-lg text-xs font-semibold text-white',
-                          isPdf ? 'bg-orange-500' : 'bg-primary',
+                    <div key={typeKey}>
+                      <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {label}
+                        {list.length > 0 && (
+                          <span className="ml-2 font-normal normal-case text-foreground">
+                            ({list.length})
+                          </span>
                         )}
-                      >
-                        {ext}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{d.file_name}</p>
-                        <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-                          <Clock className="size-3" />
-                          v1.0 · {new Date(d.uploaded_at).toLocaleDateString('id-ID')}
+                      </h4>
+                      {list.length === 0 ? (
+                        <p className="rounded-lg border border-dashed border-border bg-muted/10 py-6 text-center text-sm text-muted-foreground">
+                          Belum ada dokumen {label.toLowerCase()}.
                         </p>
-                        <a
-                          href={d.url}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                          download
-                          className="mt-2 inline-flex items-center justify-center rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-primary"
-                          title="Unduh"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <Download className="size-4" />
-                        </a>
-                      </div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                                <th className="pb-3 font-medium">Nama File</th>
+                                <th className="pb-3 font-medium">Jenis</th>
+                                <th className="pb-3 font-medium">Tanggal Unggah</th>
+                                <th className="pb-3 font-medium text-right">Aksi</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {list.map((d) => {
+                                const ext = getFileExt(d.file_name);
+                                const isPdf = ext === 'PDF';
+                                return (
+                                  <tr key={d.key} className="border-b border-border/80">
+                                    <td className="py-3">
+                                      <div className="flex items-center gap-2">
+                                        <div
+                                          className={cn(
+                                            'flex size-9 shrink-0 items-center justify-center rounded-md text-xs font-semibold text-white',
+                                            isPdf ? 'bg-orange-500' : 'bg-primary',
+                                          )}
+                                        >
+                                          {ext}
+                                        </div>
+                                        <p className="truncate font-medium max-w-[240px] sm:max-w-none">{d.file_name}</p>
+                                      </div>
+                                    </td>
+                                    <td className="py-3 text-muted-foreground">{ext}</td>
+                                    <td className="py-3 text-muted-foreground">
+                                      {new Date(d.uploaded_at).toLocaleDateString('id-ID', {
+                                        day: 'numeric',
+                                        month: 'short',
+                                        year: 'numeric',
+                                      })}
+                                    </td>
+                                    <td className="py-3 text-right">
+                                      <a
+                                        href={d.url}
+                                        target="_blank"
+                                        rel="noreferrer noopener"
+                                        download
+                                        className="inline-flex items-center justify-center rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-primary"
+                                        title="Unduh"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        <Download className="size-4" />
+                                      </a>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
                     </div>
                   );
                 })}

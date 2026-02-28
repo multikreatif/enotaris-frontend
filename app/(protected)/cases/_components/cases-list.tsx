@@ -21,6 +21,7 @@ import {
   type JenisPekerjaanResponse,
 } from '@/lib/api';
 import { CreatePPATCaseDialog } from './create-ppat-case-dialog';
+import { CreateNotarisCaseDialog } from './create-notaris-case-dialog';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -386,6 +387,13 @@ export function CasesList({
 
       {category === 'ppat' ? (
         <CreatePPATCaseDialog
+          open={createOpen}
+          onOpenChange={setCreateOpen}
+          token={token}
+          onSuccess={handleCreateSuccess}
+        />
+      ) : category === 'notaris' ? (
+        <CreateNotarisCaseDialog
           open={createOpen}
           onOpenChange={setCreateOpen}
           token={token}

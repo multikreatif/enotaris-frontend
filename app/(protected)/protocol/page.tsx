@@ -94,10 +94,10 @@ export default function ProtocolPage() {
           title={
             <span className="inline-flex items-center gap-2">
               <FileText className="size-5" />
-              <span>Digital Protocol</span>
+              <span>Repertorium</span>
             </span>
           }
-          description="Daftar repertorium dan lokasi fisik minuta."
+          description="Daftar repertorium Notaris dan lokasi fisik minuta."
         />
         <ToolbarActions>
           <div className="flex flex-wrap items-center gap-2">

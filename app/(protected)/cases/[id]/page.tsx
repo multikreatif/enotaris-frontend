@@ -1,7 +1,7 @@
 'use client';
 
 import { JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   Toolbar,
@@ -19,6 +19,7 @@ import {
 import {
   getCaseApi,
   getTasksByCaseApi,
+  getCasePartiesApi,
   getUsersApi,
   getJenisPekerjaanApi,
   createTaskApi,
@@ -32,6 +33,7 @@ import {
   getProtocolEntriesApi,
   type CaseResponse,
   type TaskResponse,
+  type CasePartyItem,
   type TaskStatus,
   type WorkflowTemplateItem,
   type TaskHistoryItem,
@@ -52,11 +54,12 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Plus, LayoutDashboard, ListTodo, History, FileText, User, Workflow, Clock, Calendar, CalendarPlus, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Plus, LayoutDashboard, ListTodo, History, FileText, User, Users, Workflow, Clock, Calendar, CalendarPlus, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { TimelineItem } from '@/components/partials/activities/timeline-item';
 import { ScheduleEventDialog } from '@/app/(protected)/calendar/_components/schedule-event-dialog';
 import { CaseDocumentTab } from '@/app/(protected)/cases/[id]/_components/case-document-tab';
+import { CaseOverviewTab } from '@/app/(protected)/cases/[id]/_components/case-overview-tab';
 
 const TASK_STATUSES_EDITABLE: TaskStatus[] = ['todo', 'in_progress', 'done', 'blocked'];
 const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
@@ -80,6 +83,22 @@ const EVENT_TYPE_LABELS: Record<ScheduleEventType, string> = {
   batas_pajak: 'Batas pajak',
   lainnya: 'Lainnya',
 };
+
+const PARTY_ROLE_LABELS: Record<string, string> = {
+  primary_contact: 'Kontak utama',
+  pihak_pertama: 'Pihak pertama',
+  pihak_kedua: 'Pihak kedua',
+  pemberi_kuasa: 'Pemberi kuasa',
+  penerima_kuasa: 'Penerima kuasa',
+  saksi: 'Saksi',
+  pihak_mengalihkan: 'Pihak mengalihkan',
+  pihak_menerima: 'Pihak menerima',
+  lainnya: 'Lainnya',
+};
+
+function roleToLabel(role: string): string {
+  return PARTY_ROLE_LABELS[role] ?? role;
+}
 
 type TimelineEvent = {
   id: string;
@@ -158,7 +177,12 @@ export default function CaseDetailPage() {
   const [applyTemplateOpen, setApplyTemplateOpen] = useState(false);
   const [historyTaskId, setHistoryTaskId] = useState<string | null>(null);
   const [blockedNoteTask, setBlockedNoteTask] = useState<TaskResponse | null>(null);
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const [activeTab, setActiveTab] = useState(() => (tabParam === 'dokumen' ? 'dokumen' : 'dashboard'));
+  useEffect(() => {
+    if (tabParam === 'dokumen') setActiveTab('dokumen');
+  }, [tabParam]);
   const [scheduleEvents, setScheduleEvents] = useState<ScheduleEventItem[]>([]);
   const [scheduleEventsLoading, setScheduleEventsLoading] = useState(false);
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
@@ -177,20 +201,33 @@ export default function CaseDetailPage() {
   const [protocolErr, setProtocolErr] = useState<string | null>(null);
   const [protocolSubmitting, setProtocolSubmitting] = useState(false);
   const [hasProtocolEntry, setHasProtocolEntry] = useState(false);
+  const [caseParties, setCaseParties] = useState<CasePartyItem[]>([]);
+  const [casePartiesLoading, setCasePartiesLoading] = useState(false);
 
   const load = useCallback(async () => {
     if (!token || !caseId) return;
     setLoading(true);
     setError(null);
     try {
-      const [c, t, users, jpList] = await Promise.all([
+      const [c, t, users, jpList, partiesRes, scheduleRes] = await Promise.all([
         getCaseApi(token, caseId),
         getTasksByCaseApi(token, caseId),
         getUsersApi(token),
         getJenisPekerjaanApi(token),
+        getCasePartiesApi(token, caseId).catch(() => [] as CasePartyItem[]),
+        (() => {
+          const now = new Date();
+          const from = new Date(now.getFullYear(), now.getMonth(), 1);
+          const to = new Date(now.getFullYear(), now.getMonth() + 2, 0);
+          const fromStr = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}-01`;
+          const toStr = `${to.getFullYear()}-${String(to.getMonth() + 1).padStart(2, '0')}-${String(to.getDate()).padStart(2, '0')}`;
+          return getScheduleEventsApi(token, { from: fromStr, to: toStr, case_id: caseId }).catch(() => [] as ScheduleEventItem[]);
+        })(),
       ]);
       setCaseData(c);
       setTasks(t);
+      setCaseParties(partiesRes);
+      setScheduleEvents(scheduleRes);
       if (c.status === 'registered' || c.status === 'closed') {
         try {
           const { data: protocolList } = await getProtocolEntriesApi(token, { case_id: c.id, limit: 1 });
@@ -259,6 +296,23 @@ export default function CaseDetailPage() {
   useEffect(() => {
     if (activeTab === 'kalender') loadScheduleEvents();
   }, [activeTab, loadScheduleEvents]);
+
+  const loadCaseParties = useCallback(async () => {
+    if (!token || !caseId) return;
+    setCasePartiesLoading(true);
+    try {
+      const list = await getCasePartiesApi(token, caseId);
+      setCaseParties(list);
+    } catch {
+      setCaseParties([]);
+    } finally {
+      setCasePartiesLoading(false);
+    }
+  }, [token, caseId]);
+
+  useEffect(() => {
+    if (activeTab === 'parties') loadCaseParties();
+  }, [activeTab, loadCaseParties]);
 
   const openAddSchedule = () => {
     setScheduleDialogEdit(null);
@@ -495,10 +549,18 @@ export default function CaseDetailPage() {
                   <LayoutDashboard className="size-4" />
                   Overview
                 </TabsTrigger>
+                <TabsTrigger value="parties" className="gap-2">
+                  <Users className="size-4" />
+                  Parties
+                </TabsTrigger>
                 <TabsTrigger value="tahapan" className="gap-2">
                   <ListTodo className="size-4" />
                   Tahapan
                 </TabsTrigger>
+                <TabsTrigger value="dokumen" className="gap-2">
+                  <FileText className="size-4" />
+                  Dokumen
+                </TabsTrigger>                
                 <TabsTrigger value="kalender" className="gap-2">
                   <Calendar className="size-4" />
                   Kalender
@@ -507,211 +569,85 @@ export default function CaseDetailPage() {
                   <History className="size-4" />
                   Timeline
                 </TabsTrigger>
-                <TabsTrigger value="dokumen" className="gap-2">
-                  <FileText className="size-4" />
-                  Dokumen
-                </TabsTrigger>
               </TabsList>
 
               <TabsContent value="dashboard" className="mt-0">
-                <div className="space-y-6">
-                  {/* Ringkasan singkat: judul berkas + status + PIC */}
-                  <div className="kt-card p-5">
-                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="min-w-0">
-                        <h2 className="truncate text-lg font-semibold text-foreground">
-                          {displayJenisTitle}
-                          {caseData.nomor_draft ? (
-                              <span className="ml-2 font-normal text-muted-foreground">
-                                — {caseData.nomor_draft}
-                              </span>
-                            ) : null}
-                        </h2>
-                        {caseData.nama_para_pihak ? (
-                          <p className="mt-1 truncate text-sm text-muted-foreground">
-                            {caseData.nama_para_pihak}
-                          </p>
-                        ) : null}
-                      </div>
-                      <div className="flex flex-wrap items-center gap-3 shrink-0">
-                        <span
-                          className={cn(
-                            'kt-badge',
-                            caseData.status === 'closed' && 'kt-badge-secondary',
-                            caseData.status === 'registered' && 'kt-badge-success',
-                            caseData.status === 'signed' && 'kt-badge-warning',
-                            (caseData.status === 'drafting' || !caseData.status) && 'kt-badge-info'
-                          )}
-                        >
-                          {STATUS_LABELS[caseData.status] ?? caseData.status}
-                        </span>
-                        {picName !== '-' && (
-                          <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                            <User className="size-4 shrink-0" />
-                            <span>PIC: {picName}</span>
-                          </span>
-                        )}
-                      </div>
-                    </div>
+                <CaseOverviewTab
+                  caseData={caseData}
+                  tasks={tasks}
+                  caseParties={caseParties}
+                  scheduleEvents={scheduleEvents}
+                  timeline={timeline}
+                  userNames={userNames}
+                  displayJenisTitle={displayJenisTitle}
+                  displayJenisPekerjaanPpat={displayJenisPekerjaanPpat}
+                  picName={picName}
+                  STATUS_LABELS={STATUS_LABELS}
+                  formatDateKey={formatDateKey}
+                  formatTime={formatTime}
+                  roleToLabel={roleToLabel}
+                  onSetActiveTab={setActiveTab}
+                  onOpenAddTask={() => setAddTaskOpen(true)}
+                  onOpenApplyTemplate={() => setApplyTemplateOpen(true)}
+                />
+              </TabsContent>
+
+              <TabsContent value="parties" className="mt-0">
+                <section className="rounded-xl border border-border bg-card overflow-hidden">
+                  <div className="border-b border-border px-4 py-4">
+                    <h3 className="flex items-center gap-2 text-sm font-semibold">
+                      <Users className="size-4 text-muted-foreground" />
+                      Pihak dalam akta
+                    </h3>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Daftar pihak (klien) yang terlibat dalam berkas ini beserta perannya.
+                    </p>
                   </div>
-
-                  <div className="grid gap-6 lg:grid-cols-2">
-                    {/* Detail berkas */}
-                    <div className="kt-card">
-                      <div className="kt-card-header border-b border-border py-4">
-                        <h3 className="flex items-center gap-2 text-sm font-semibold">
-                          <FileText className="size-4 text-muted-foreground" />
-                          Detail berkas
-                        </h3>
-                      </div>
-                      <div className="p-4">
-                        <dl className="grid gap-4 text-sm">
-                          <div>
-                            <dt className="text-muted-foreground text-xs font-medium uppercase tracking-wider">Jenis akta</dt>
-                            <dd className="mt-0.5 font-medium">{caseData.category === 'ppat' && caseData.jenis_pekerjaan_ppat ? displayJenisPekerjaanPpat : caseData.jenis_akta}</dd>
-                          </div>
-                          <div>
-                            <dt className="text-muted-foreground text-xs font-medium uppercase tracking-wider">Nomor draft / Nomor akta</dt>
-                            <dd className="mt-0.5">{caseData.nomor_draft || '—'}</dd>
-                          </div>
-                          <div>
-                            <dt className="text-muted-foreground text-xs font-medium uppercase tracking-wider">Nama para pihak</dt>
-                            <dd className="mt-0.5">{caseData.nama_para_pihak || '—'}</dd>
-                          </div>
-                          {(caseData.tanggal_mulai || caseData.target_selesai) && (
-                            <div className="flex flex-wrap gap-6">
-                              {caseData.tanggal_mulai && (
-                                <div>
-                                  <dt className="text-muted-foreground text-xs font-medium uppercase tracking-wider">Tanggal akta</dt>
-                                  <dd className="mt-0.5">{formatDateKey(caseData.tanggal_mulai)}</dd>
-                                </div>
-                              )}
-                              {caseData.target_selesai && (
-                                <div>
-                                  <dt className="text-muted-foreground text-xs font-medium uppercase tracking-wider">Target selesai</dt>
-                                  <dd className="mt-0.5">{formatDateKey(caseData.target_selesai)}</dd>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                          {caseData.nilai_transaksi != null && caseData.nilai_transaksi > 0 && (
-                            <div>
-                              <dt className="text-muted-foreground text-xs font-medium uppercase tracking-wider">Nilai transaksi</dt>
-                              <dd className="mt-0.5 tabular-nums">
-                                {new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(caseData.nilai_transaksi)}
-                              </dd>
-                            </div>
-                          )}
-                          {caseData.jenis_pekerjaan_ppat && (
-                            <div>
-                              <dt className="text-muted-foreground text-xs font-medium uppercase tracking-wider">Jenis pekerjaan (PPAT)</dt>
-                              <dd className="mt-0.5">{displayJenisPekerjaanPpat}</dd>
-                            </div>
-                          )}
-                          <div>
-                            <dt className="text-muted-foreground text-xs font-medium uppercase tracking-wider">Penanggung jawab (PIC)</dt>
-                            <dd className="mt-0.5">{picName}</dd>
-                          </div>
-                        </dl>
-                      </div>
-                    </div>
-
-                    {/* Progress tahapan + Aktivitas */}
-                    <div className="space-y-6">
-                      <div className="kt-card">
-                        <div className="kt-card-header border-b border-border py-4 flex flex-row items-center justify-between">
-                          <h3 className="flex items-center gap-2 text-sm font-semibold">
-                            <ListTodo className="size-4 text-muted-foreground" />
-                            Progress tahapan
-                          </h3>
-                          <div className="flex items-center gap-2">
-                            <Button variant="ghost" size="sm" onClick={() => setActiveTab('tahapan')}>
-                              Lihat semua
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setApplyTemplateOpen(true)}
-                            >
-                              <Workflow className="me-1.5 size-4" />
-                              Terapkan Template
-                            </Button>
-                          </div>
-                        </div>
-                        <div className="p-4">
-                          {tasks.length === 0 ? (
-                            <p className="text-sm text-muted-foreground">Belum ada tahapan. Tambah tahapan di tab Tahapan.</p>
-                          ) : (
-                            <>
-                              {(() => {
-                                const doneCount = tasks.filter((t) => t.status === 'done').length;
-                                const pct = tasks.length ? Math.round((100 * doneCount) / tasks.length) : 0;
-                                return (
-                                  <>
-                                    <div className="flex flex-wrap items-baseline gap-2">
-                                      <span className="text-2xl font-semibold tabular-nums">
-                                        {doneCount}
-                                      </span>
-                                      <span className="text-muted-foreground text-sm">
-                                        dari {tasks.length} tahapan selesai
-                                      </span>
-                                      <span className="text-sm font-medium tabular-nums text-primary">
-                                        ({pct}%)
-                                      </span>
-                                    </div>
-                                    <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-muted">
-                                      <div
-                                        className="h-full rounded-full bg-primary transition-all"
-                                        style={{ width: `${pct}%` }}
-                                      />
-                                    </div>
-                                  </>
-                                );
-                              })()}
-                            </>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="kt-card">
-                        <div className="kt-card-header border-b border-border py-4 flex flex-row items-center justify-between">
-                          <h3 className="flex items-center gap-2 text-sm font-semibold">
-                            <History className="size-4 text-muted-foreground" />
-                            Aktivitas terbaru
-                          </h3>
-                          {timeline.length > 5 && (
-                            <Button variant="ghost" size="sm" onClick={() => setActiveTab('timeline')}>
-                              Lihat semua
-                            </Button>
-                          )}
-                        </div>
-                        <div className="p-4">
-                          {timeline.length === 0 ? (
-                            <p className="text-sm text-muted-foreground">Belum ada aktivitas.</p>
-                          ) : (
-                            <ul className="space-y-3">
-                              {timeline.slice(0, 5).map((ev) => (
-                                <li key={ev.id} className="flex gap-3 text-sm">
-                                  <span className="shrink-0 text-muted-foreground tabular-nums" title={ev.at}>
-                                    {formatDateKey(ev.at)} · {formatTime(ev.at)}
+                  <div className="p-4">
+                    {casePartiesLoading ? (
+                      <p className="text-sm text-muted-foreground">Memuat...</p>
+                    ) : caseParties.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">Belum ada pihak. Pihak ditambahkan saat entri berkas.</p>
+                    ) : (
+                      <div className="kt-table-wrapper kt-scrollable overflow-x-auto">
+                        <table className="kt-table w-full align-middle">
+                          <thead>
+                            <tr>
+                              <th scope="col" className="w-12">
+                                <span className="kt-table-col">
+                                  <span className="kt-table-col-label">#</span>
+                                </span>
+                              </th>
+                              <th scope="col" className="min-w-[200px]">
+                                <span className="kt-table-col">
+                                  <span className="kt-table-col-label">Nama klien</span>
+                                </span>
+                              </th>
+                              <th scope="col" className="min-w-[160px]">
+                                <span className="kt-table-col">
+                                  <span className="kt-table-col-label">Peran</span>
+                                </span>
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {caseParties.map((p, idx) => (
+                              <tr key={p.case_party_id}>
+                                <td className="align-middle text-muted-foreground">{idx + 1}</td>
+                                <td className="align-middle font-medium">{p.client_name || '—'}</td>
+                                <td className="align-middle">
+                                  <span className="kt-badge kt-badge-info">
+                                    {roleToLabel(p.role)}
                                   </span>
-                                  <span className="min-w-0">{ev.label}</span>
-                                </li>
-                              ))}
-                              {timeline.length > 5 && (
-                                <li>
-                                  <Button variant="ghost" className="h-auto p-0 text-primary hover:underline" onClick={() => setActiveTab('timeline')}>
-                                    Lihat {timeline.length - 5} aktivitas lainnya di Timeline →
-                                  </Button>
-                                </li>
-                              )}
-                            </ul>
-                          )}
-                        </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
-                    </div>
+                    )}
                   </div>
-                </div>
+                </section>
               </TabsContent>
 
               <TabsContent value="tahapan" className="mt-0">
@@ -1043,6 +979,11 @@ export default function CaseDetailPage() {
                   picName={caseData?.staf_penanggung_jawab_id ? (userNames[caseData.staf_penanggung_jawab_id] ?? '-') : '-'}
                   userRole={user?.role_name}
                   currentUserName={user?.name ?? user?.email}
+                  primaryClientName={
+                    caseParties.find((p) => p.role === 'primary_contact')?.client_name ??
+                    caseParties[0]?.client_name ??
+                    ''
+                  }
                 />
               </TabsContent>
             </Tabs>

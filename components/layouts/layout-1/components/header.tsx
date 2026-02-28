@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   Bell,
+  Calculator,
   LayoutGrid,
   Menu,
   MessageCircleMore,
@@ -24,15 +25,18 @@ import { AppsDropdownMenu } from '@/components/layouts/layout-1/shared/topbar/ap
 import { ChatSheet } from '@/components/layouts/layout-1/shared/topbar/chat-sheet';
 import { NotificationsSheet } from '@/components/layouts/layout-1/shared/topbar/notifications-sheet';
 import { UserDropdownMenu } from '@/components/layouts/layout-1/shared/topbar/user-dropdown-menu';
+import { TaxCalculatorSheet } from '@/components/layouts/layout-1/shared/topbar/tax-calculator-sheet';
 import { MegaMenu } from './mega-menu';
 import { MegaMenuMobile } from './mega-menu-mobile';
 import { SidebarMenu } from './sidebar-menu';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
+import { usePendingReview } from '@/providers/pending-review-provider';
 
 export function Header() {
   const [isSidebarSheetOpen, setIsSidebarSheetOpen] = useState(false);
   const [isMegaMenuSheetOpen, setIsMegaMenuSheetOpen] = useState(false);
+  const { pendingCount } = usePendingReview();
 
   const pathname = usePathname();
   const mobileMode = useIsMobile();
@@ -117,6 +121,19 @@ export function Header() {
 
         {/* HeaderTopbar */}
         <div className="flex items-center gap-3">
+          <TaxCalculatorSheet
+            trigger={
+              <Button
+                variant="ghost"
+                mode="icon"
+                shape="circle"
+                className="size-9 hover:bg-primary/10 hover:[&_svg]:text-primary"
+                title="Kalkulator Pajak"
+              >
+                <Calculator className="size-4.5!" />
+              </Button>
+            }
+          />
           {!mobileMode && (
             <SearchDialog
               trigger={
@@ -137,9 +154,18 @@ export function Header() {
                 variant="ghost"
                 mode="icon"
                 shape="circle"
-                className="size-9 hover:bg-primary/10 hover:[&_svg]:text-primary"
+                className="size-9 hover:bg-primary/10 hover:[&_svg]:text-primary relative"
+                title={pendingCount > 0 ? `${pendingCount} dokumen perlu verifikasi` : 'Notifikasi'}
               >
                 <Bell className="size-4.5!" />
+                {pendingCount > 0 && (
+                  <span
+                    className="absolute top-1 end-1 flex size-4 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground"
+                    aria-label={`${pendingCount} perlu verifikasi`}
+                  >
+                    {pendingCount > 99 ? '99+' : pendingCount}
+                  </span>
+                )}
               </Button>
             }
           />

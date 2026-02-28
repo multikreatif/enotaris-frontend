@@ -161,7 +161,14 @@ export function SidebarMenuPrimary() {
           value={item.path || ''}
           className="text-[13px]"
         >
-          <Link href={item.path || '#'}>{item.title}</Link>
+          <Link href={item.path || '#'} className="flex items-center justify-between gap-2 w-full">
+            <span>{item.title}</span>
+            {item.badge && (
+              <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium bg-primary/20 text-primary">
+                {item.badge}
+              </span>
+            )}
+          </Link>
         </AccordionMenuItem>
       );
     }

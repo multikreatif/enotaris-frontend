@@ -508,16 +508,42 @@ export interface DocumentItem {
   uploaded_at: string;
 }
 
+export interface DocumentStats {
+  total_count: number;
+  client_count: number;
+  output_count: number;
+  template_count: number;
+  identity_count: number;
+  last_7_days_count: number;
+  total_size_bytes: number;
+  /** Sisa hardisk (bytes) dari MinIO. */
+  storage_free_bytes?: number;
+  /** Total kapasitas disk (bytes) dari MinIO. */
+  storage_total_bytes?: number;
+}
+
 /** GET /api/v1/documents — list documents for current office. */
-export async function getDocumentsApi(token: string | null, params?: { folder?: string }): Promise<DocumentItem[]> {
+export async function getDocumentsApi(
+  token: string | null,
+  params?: { folder?: string; limit?: number }
+): Promise<DocumentItem[]> {
   const sp = new URLSearchParams();
   if (params?.folder) sp.set('folder', params.folder);
+  if (params?.limit != null && params.limit > 0) sp.set('limit', String(params.limit));
   const q = sp.toString();
   const path = q ? `/api/v1/documents?${q}` : '/api/v1/documents';
   const res = await apiFetch(path, { method: 'GET' }, token);
   const data = await res.json().catch(() => []);
   if (!res.ok) throw new Error((data?.error as string) || 'Gagal memuat dokumen');
   return Array.isArray(data) ? data : [];
+}
+
+/** GET /api/v1/documents/stats — dashboard stats for documents menu. */
+export async function getDocumentsStatsApi(token: string | null): Promise<DocumentStats> {
+  const res = await apiFetch('/api/v1/documents/stats', { method: 'GET' }, token);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data?.error as string) || 'Gagal memuat statistik dokumen');
+  return data as DocumentStats;
 }
 
 /** POST /api/v1/documents — upload a new document. */
@@ -631,6 +657,47 @@ export async function updateProtocolEntryApi(
   return data as ProtocolEntry;
 }
 
+// --- Buku Klapper (Notaris) ---
+
+export interface KlapperEntry {
+  id: string;
+  case_id: string;
+  protocol_entry_id: string;
+  client_id: string;
+  role: string;
+  name_display: string;
+  name_normalized: string;
+  repertorium_number: string;
+  year: number;
+  jenis: string;
+  created_at: string;
+}
+
+export interface ListKlapperResult {
+  data: KlapperEntry[];
+  total: number;
+}
+
+/** GET /api/v1/klapper — list Buku Klapper entries (Notaris), optional filter by letter (A–Z). */
+export async function getKlapperApi(
+  token: string | null,
+  params?: { letter?: string; limit?: number; offset?: number }
+): Promise<ListKlapperResult> {
+  const sp = new URLSearchParams();
+  if (params?.letter) sp.set('letter', params.letter);
+  if (params?.limit != null) sp.set('limit', String(params.limit));
+  if (params?.offset != null) sp.set('offset', String(params.offset));
+  const q = sp.toString();
+  const path = q ? `/api/v1/klapper?${q}` : '/api/v1/klapper';
+  const res = await apiFetch(path, { method: 'GET' }, token);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data?.error as string) || 'Gagal memuat Buku Klapper');
+  return {
+    data: Array.isArray(data.data) ? (data.data as KlapperEntry[]) : [],
+    total: typeof data.total === 'number' ? (data.total as number) : 0,
+  };
+}
+
 /** GET /api/v1/cases */
 export async function getCasesApi(
   token: string | null,
@@ -656,6 +723,25 @@ export async function getCaseApi(token: string | null, id: string): Promise<Case
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((data?.error as string) || 'Perkara tidak ditemukan');
   return data as CaseResponse;
+}
+
+/** Case party item (GET /api/v1/cases/:id/parties). */
+export interface CasePartyItem {
+  case_party_id: string;
+  client_id: string;
+  client_name: string;
+  role: string;
+}
+
+/** GET /api/v1/cases/:id/parties — list parties for a case. */
+export async function getCasePartiesApi(
+  token: string | null,
+  caseId: string
+): Promise<CasePartyItem[]> {
+  const res = await apiFetch(`/api/v1/cases/${caseId}/parties`, { method: 'GET' }, token);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data?.error as string) || 'Gagal memuat pihak');
+  return Array.isArray(data) ? data : [];
 }
 
 export interface CreateCaseBody {
@@ -987,6 +1073,34 @@ export async function getCaseDocumentEntriesApi(
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((data?.error as string) || 'Gagal memuat entri dokumen');
   return Array.isArray(data?.data) ? data.data : [];
+}
+
+/** Item untuk notifikasi "perlu verifikasi" (dokumen diunggah staff, menunggu review notaris). */
+export interface PendingReviewItem {
+  entry: CaseDocumentEntryItem;
+  case: CaseResponse;
+}
+
+/** Mengambil daftar dokumen yang menunggu verifikasi notaris (pending) dari berkas-berkas. */
+export async function getPendingReviewItemsApi(
+  token: string | null,
+  options?: { caseLimit?: number }
+): Promise<PendingReviewItem[]> {
+  const limit = options?.caseLimit ?? 40;
+  const { data: cases } = await getCasesApi(token, { limit, status: 'drafting' });
+  const results: PendingReviewItem[] = [];
+  await Promise.all(
+    cases.map(async (c) => {
+      const entries = await getCaseDocumentEntriesApi(token, c.id).catch(() => []);
+      entries
+        .filter((e) => e.verification_status === 'pending')
+        .forEach((entry) => results.push({ entry, case: c }));
+    })
+  );
+  results.sort(
+    (a, b) => new Date(b.entry.uploaded_at).getTime() - new Date(a.entry.uploaded_at).getTime()
+  );
+  return results;
 }
 
 /** POST /api/v1/cases/:id/document-entries — create or replace entry (after upload; sets status pending). */
